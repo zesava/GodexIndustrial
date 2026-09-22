@@ -1,40 +1,77 @@
 # Godex Industrial
 
-Windows Forms application for sending GoDEX label commands through LAN (port 9100), a COM port, or a Windows printer queue.
+Windows-застосунок для створення та друку текстових бірок на принтерах GoDEX. Підтримує шаблони, імпорт даних з Excel, попередній перегляд і надсилання команд через LAN, COM-порт або чергу принтерів Windows.
 
-## Build
+## Можливості
 
-Requirements: Windows, Visual Studio with the .NET Framework 4.7.2 targeting pack and MSBuild, and access to the FontAwesome.Sharp 6.6.0 NuGet package.
+- Шаблони бірок із розмірами, проміжком між бірками, кількістю колонок, зміщеннями тексту, розміром шрифту, швидкістю та щільністю друку.
+- Обертання тексту на 0°, 90°, 180° або 270°.
+- Вставлення табличних даних з Excel, ручне редагування рядків і генерація числових серій.
+- Попередній перегляд до 10 бірок на сторінці та окрема вкладка з командами принтера.
+- Друк через TCP/IP, послідовний порт або встановлений у Windows принтер.
 
-From a Visual Studio Developer PowerShell in the solution directory:
+## Вимоги
 
-    msbuild WindowsFormsApp1.sln /restore /p:Configuration=Release
+- Windows із **.NET Framework 4.7.2**.
+- Для збірки: Visual Studio з підтримкою розробки .NET desktop і targeting pack для .NET Framework 4.7.2.
+- Для першого відновлення залежностей потрібен доступ до NuGet: проєкт використовує `FontAwesome.Sharp 6.6.0`.
 
-The application is in WindowsFormsApp1/bin/Release/GodexIndustrial.exe.
+## Збірка та запуск
 
-Run the lightweight checks with:
+Відкрийте `WindowsFormsApp1.sln` у Visual Studio та зберіть конфігурацію **Release**. Або виконайте в Developer PowerShell для Visual Studio з кореня репозиторію:
 
-    msbuild Tests/Tests.csproj /p:Configuration=Debug
-    Tests/bin/Debug/GodexIndustrial.Tests.exe
+~~~powershell
+msbuild WindowsFormsApp1.sln /restore /p:Configuration=Release
+.\WindowsFormsApp1\bin\Release\GodexIndustrial.exe
+~~~
 
-## Use
+Готові файли лежать у `WindowsFormsApp1\bin\Release\`. Якщо переносите застосунок на інший комп’ютер, копіюйте весь вміст цієї папки разом із залежностями.
 
-1. Select or create a label template. Width, length, gap, darkness, speed, text size, and X/Y offsets control the printer commands. Text rotation can be selected as 0°, 90°, 180°, or 270°; saved templates keep their numeric rotation value.
-2. Open **Print data** and paste tab-separated cells from Excel. Choose whether to replace or append the rows. The template's column count determines how many cells may be imported.
-3. Select LAN, COM, or USB in **Printer connection**. For LAN, enter an IPv4 address and click **Apply**. For COM and USB, choose the port or printer in the list.
-4. Use **Preview** to inspect up to ten labels per page, each with a frame based on its width and length in millimetres. The gray strip represents the configured gap; dashed outlines mark text fields, and red marks text that extends beyond a label. Coordinates are converted for a 203 dpi printer (8 dots/mm). The preview rotates text according to the selected angle and remains an approximation; verify placement with a test print.
-5. Click **Print**. A success message means the job was handed to the printer connection or Windows spooler; it does not confirm that paper was produced.
+## Перший друк
 
-The current printer profile supports ASCII text. Non-ASCII characters cause a visible error instead of being silently replaced. Confirm the printer's character set before adding other encodings.
+1. У розділі **Label** створіть шаблон або виберіть наявний. Вкажіть ширину й довжину бірки, проміжок, кількість колонок та розташування тексту. Збережіть шаблон.
+2. У розділі **Print data** заповніть рядки вручну, вставте скопійовані клітинки з Excel або згенеруйте числову серію. Під час імпорту можна замінити наявні рядки або додати нові.
+3. У **Printer connection** виберіть спосіб підключення:
 
-Templates, settings, and daily logs are stored in %LocalAppData%/GodexIndustrial. On first run, templates from a Templates folder beside the executable are copied there. Existing files in the new location take priority. Back up the application data directory to preserve custom templates.
+   | Спосіб | Що потрібно |
+   | --- | --- |
+   | LAN | IPv4-адреса принтера; застосунок надсилає команди на TCP-порт 9100. Натисніть **Apply** після введення адреси. |
+   | COM port | Доступний COM-порт і швидкість передавання, яка збігається з налаштуванням принтера. |
+   | USB | Принтер, встановлений у Windows і вибраний зі списку; дані передаються в чергу друку як RAW-завдання. |
 
-## Troubleshooting
+4. Натисніть **Preview**. Перевірте розміщення тексту й за потреби перегляньте вкладку **Printer commands**.
+5. Натисніть **Print** і перевірте результат на принтері.
 
-If a job fails, check the message and **Log** tab. LAN connections and status reads time out after three seconds. COM and USB require an available device selected in the corresponding list. The USB path uses the Windows RAW print API; the Windows printer queue must be installed for the device.
+У перегляді суцільна рамка показує розмір бірки, сіра смуга — проміжок між бірками, пунктир — межі текстових полів, червоний колір — вихід тексту за межі бірки. Масштаб розраховано для **203 dpi**. Перегляд є наближенням: перед серійним друком зробіть пробну бірку.
 
-The automated checks cover TSV import, label command generation, template validation, and atomic file replacement. Printer output and physical label layout still require testing on the target GoDEX model.
+## Де зберігаються дані
 
+Застосунок використовує `%LOCALAPPDATA%\GodexIndustrial\`:
 
+- `Templates\*.json` — шаблони;
+- `settings.json` — вибране підключення та налаштування;
+- `Logs\log_YYYYMMDD.txt` — щоденні журнали.
 
+Під час першого запуску шаблони з папки `Templates` поруч із виконуваним файлом копіюються до локальної папки, якщо там ще немає файлів із такими назвами. Для резервної копії збережіть папку `%LOCALAPPDATA%\GodexIndustrial\`.
 
+## Обмеження та діагностика
+
+- Поточний профіль команд підтримує лише **ASCII**. Не-ASCII символи в даних друку спричинять помилку; символи керування принтером `^` і `~` у тексті бірки також заборонені.
+- Повідомлення про успішне надсилання означає, що дані передано підключенню або черзі Windows. Воно не підтверджує фізичний друк бірки.
+- Якщо друк не вдався, перевірте повідомлення та вкладку **Log**, адресу або вибраний порт/принтер, а також стан пристрою. Для USB потрібна встановлена черга принтера; читання статусу через USB недоступне.
+- Підключення LAN і читання статусу мають тайм-аут 3 секунди.
+
+## Перевірки
+
+З кореня репозиторію:
+
+~~~powershell
+msbuild WindowsFormsApp1.sln /restore /p:Configuration=Debug
+.\Tests\bin\Debug\GodexIndustrial.Tests.exe
+~~~
+
+Автоматичні перевірки охоплюють імпорт табличних даних, генерацію команд, валідацію шаблонів і геометрію перегляду. Роботу з конкретною моделлю GoDEX та фізичне розташування тексту потрібно перевіряти на принтері.
+
+## Ліцензія
+
+[GNU Affero General Public License v3.0](LICENSE.txt).

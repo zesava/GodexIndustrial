@@ -190,9 +190,8 @@ namespace GodexIndustrial.Tests
                         previewType, new object[] { uiTemplate,
                             new List<string[]> { new[] { "ROTATION" } }, "" }))
                     {
-                        var tabs = (System.Windows.Forms.TabControl)preview.Controls[0];
-                        var table = (System.Windows.Forms.TableLayoutPanel)tabs.TabPages[0].Controls[0];
-                        var viewport = (System.Windows.Forms.Panel)table.GetControlFromPosition(0, 1);
+                        var viewport = (System.Windows.Forms.Panel)previewType
+                            .GetField("_viewport", flags).GetValue(preview);
                         var canvas = (System.Windows.Forms.Panel)viewport.Controls[0];
                         canvas.Dock = System.Windows.Forms.DockStyle.None;
                         canvas.Size = new System.Drawing.Size(600, 300);
@@ -222,7 +221,3 @@ namespace GodexIndustrial.Tests
         }
     }
 }
-
-
-
-

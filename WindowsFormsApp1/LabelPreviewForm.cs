@@ -61,15 +61,27 @@ namespace GodexIndustrial
             titleBar.Controls.Add(close);
             CancelButton = close;
 
-            var tabs = new TabControl
+            var pages = new Panel { Dock = DockStyle.Fill, BackColor = BackgroundColor };
+            var pageContent = new Panel { Dock = DockStyle.Fill, BackColor = BackgroundColor };
+            var tabHeader = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = HeaderColor };
+            var labelsTab = new Button { Text = "Labels", Location = Point.Empty, Size = new Size(180, 40) };
+            var commandsTab = new Button
             {
-                Dock = DockStyle.Fill, BackColor = BackgroundColor, ForeColor = Color.Gainsboro,
-                DrawMode = TabDrawMode.OwnerDrawFixed, SizeMode = TabSizeMode.Fixed,
-                ItemSize = new Size(180, 36), Padding = new Point(12, 4)
+                Text = "Printer commands", Location = new Point(180, 0), Size = new Size(180, 40)
             };
-            tabs.DrawItem += DrawTab;
-            var previewPage = new TabPage("Labels") { BackColor = BackgroundColor, Padding = new Padding(8) };
-            var commandsPage = new TabPage("Printer commands") { BackColor = BackgroundColor, Padding = new Padding(8) };
+            StyleTabButton(labelsTab);
+            StyleTabButton(commandsTab);
+            var selectedLine = new Panel
+            {
+                Size = new Size(164, 3), Location = new Point(8, 37), BackColor = AccentColor
+            };
+            tabHeader.Controls.Add(labelsTab);
+            tabHeader.Controls.Add(commandsTab);
+            tabHeader.Controls.Add(selectedLine);
+            var previewPage = new Panel { Name = "PreviewPage", Dock = DockStyle.Fill,
+                BackColor = BackgroundColor, Padding = new Padding(8) };
+            var commandsPage = new Panel { Name = "CommandsPage", Dock = DockStyle.Fill,
+                BackColor = BackgroundColor, Padding = new Padding(8) };
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -116,10 +128,25 @@ namespace GodexIndustrial
                 WordWrap = false, Font = new Font(FontFamily.GenericMonospace, 10), Text = commands,
                 BackColor = InputColor, ForeColor = Color.Gainsboro, BorderStyle = BorderStyle.FixedSingle
             });
-            tabs.TabPages.Add(previewPage);
-            tabs.TabPages.Add(commandsPage);
-            Controls.Add(tabs);
+            pageContent.Controls.Add(previewPage);
+            pageContent.Controls.Add(commandsPage);
+            pages.Controls.Add(pageContent);
+            pages.Controls.Add(tabHeader);
+            Action<int> selectPage = index =>
+            {
+                previewPage.Visible = index == 0;
+                commandsPage.Visible = index == 1;
+                labelsTab.BackColor = index == 0 ? BackgroundColor : HeaderColor;
+                commandsTab.BackColor = index == 1 ? BackgroundColor : HeaderColor;
+                labelsTab.ForeColor = index == 0 ? Color.White : Color.Gainsboro;
+                commandsTab.ForeColor = index == 1 ? Color.White : Color.Gainsboro;
+                selectedLine.Left = 8 + index * 180;
+            };
+            labelsTab.Click += (sender, args) => selectPage(0);
+            commandsTab.Click += (sender, args) => selectPage(1);
+            Controls.Add(pages);
             Controls.Add(titleBar);
+            selectPage(0);
             UpdatePage();
         }
 
@@ -134,21 +161,24 @@ namespace GodexIndustrial
             button.UseVisualStyleBackColor = false;
         }
 
-        private static void DrawTab(object sender, DrawItemEventArgs e)
+        private static void StylePageButton(Button button, bool available, bool primary)
         {
-            var tabs = (TabControl)sender;
-            bool selected = e.Index == tabs.SelectedIndex;
-            using (var background = new SolidBrush(selected ? BackgroundColor : HeaderColor))
-                e.Graphics.FillRectangle(background, e.Bounds);
-            TextRenderer.DrawText(e.Graphics, tabs.TabPages[e.Index].Text, tabs.Font, e.Bounds,
-                selected ? Color.White : Color.Gainsboro,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            if (selected)
-            {
-                using (var accent = new Pen(AccentColor, 3f))
-                    e.Graphics.DrawLine(accent, e.Bounds.Left + 8, e.Bounds.Bottom - 2,
-                        e.Bounds.Right - 8, e.Bounds.Bottom - 2);
-            }
+            button.BackColor = available && primary ? AccentColor : SecondaryButtonColor;
+            button.ForeColor = available
+                ? (primary ? Color.White : Color.Gainsboro)
+                : Color.FromArgb(140, 140, 160);
+            button.TabStop = available;
+            button.Cursor = available ? Cursors.Hand : Cursors.Default;
+        }
+
+        private static void StyleTabButton(Button button)
+        {
+            button.BackColor = HeaderColor;
+            button.ForeColor = Color.Gainsboro;
+            button.Font = new Font("Segoe UI", 11F);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.UseVisualStyleBackColor = false;
         }
 
         private int VisibleCount => Math.Min(PageSize, _rows.Count - _page * PageSize);
@@ -157,8 +187,8 @@ namespace GodexIndustrial
         {
             int first = _page * PageSize + 1;
             _pageLabel.Text = $"Labels {first}–{first + VisibleCount - 1} of {_rows.Count}";
-            _previous.Enabled = _page > 0;
-            _next.Enabled = (_page + 1) * PageSize < _rows.Count;
+            StylePageButton(_previous, _page > 0, false);
+            StylePageButton(_next, (_page + 1) * PageSize < _rows.Count, true);
             _viewport.AutoScrollPosition = Point.Empty;
             UpdateCanvasSize();
         }
