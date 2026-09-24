@@ -71,6 +71,7 @@
     <Compile Include="AppStorage.cs" />
     <Compile Include="PrinterSettingsStore.cs" />
     <Compile Include="PrinterSelection.cs" />
+    <Compile Include="PrinterStatusInfo.cs" />
     <Compile Include="LabelDataParser.cs" />
     <Compile Include="LabelCommandBuilder.cs" />
     <Compile Include="LabelRotation.cs" />

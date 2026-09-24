@@ -176,10 +176,13 @@ namespace GodexIndustrial
                             stream.WriteTimeout = 3000;
                             byte[] command = Encoding.ASCII.GetBytes("~S,CHECK" + Environment.NewLine);
                             stream.Write(command, 0, command.Length);
-                            byte[] buffer = new byte[1024];
-                            int read = stream.Read(buffer, 0, buffer.Length);
-                            if (read == 0) throw new IOException("Printer closed the connection without a status reply.");
-                            return Encoding.ASCII.GetString(buffer, 0, read).Trim();
+                            using (var reader = new StreamReader(stream, Encoding.ASCII, false, 1024, true))
+                            {
+                                string response = reader.ReadLine();
+                                if (response == null)
+                                    throw new IOException("Printer closed the connection without a status reply.");
+                                return response.Trim();
+                            }
                         }
                     }
                     using (var serial = new SerialPort(com, baud, Parity.None, 8, StopBits.One))

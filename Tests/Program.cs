@@ -34,6 +34,18 @@ namespace GodexIndustrial.Tests
         [STAThread]
         private static void Main()
         {
+            Check(PrinterStatusInfo.Parse("00\r\n").Kind == PrinterStatusKind.Ready,
+                "GoDEX ready status");
+            Check(PrinterStatusInfo.Parse("04\r\n").Description == "Printhead open",
+                "GoDEX open printhead status");
+            Check(PrinterStatusInfo.Parse("20").Kind == PrinterStatusKind.Busy,
+                "GoDEX paused status");
+            Check(PrinterStatusInfo.Parse("50").Description == "Printing",
+                "GoDEX printing status");
+            Check(PrinterStatusInfo.Parse("99").Kind == PrinterStatusKind.Unknown,
+                "Unknown GoDEX status code");
+            Check(PrinterStatusInfo.Parse("").Kind == PrinterStatusKind.Unknown,
+                "Empty GoDEX status response");
             var rows = LabelDataParser.ParseTsv("A\tB\r\nC\t\r\n", 2);
             Check(rows.Count == 2 && rows[0][1] == "B" && rows[1][1] == "", "Windows TSV parse");
             rows = LabelDataParser.ParseTsv("A\tB\nC\tD", 2);
@@ -134,10 +146,75 @@ namespace GodexIndustrial.Tests
                 return File.Exists(dependency) ? System.Reflection.Assembly.LoadFrom(dependency) : null;
             };
             var application = System.Reflection.Assembly.LoadFrom(Path.Combine(appDirectory, "GodexIndustrial.exe"));
+            var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            listener.Start();
+            try
+            {
+                var statusReply = System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (var client = listener.AcceptTcpClient())
+                    using (var stream = client.GetStream())
+                    {
+                        stream.ReadTimeout = 3000;
+                        var received = new System.Text.StringBuilder();
+                        var buffer = new byte[64];
+                        while (!received.ToString().Contains("~S,CHECK\r\n"))
+                        {
+                            int count = stream.Read(buffer, 0, buffer.Length);
+                            if (count == 0) throw new IOException("Status query ended early.");
+                            received.Append(System.Text.Encoding.ASCII.GetString(buffer, 0, count));
+                        }
+                        byte[] first = System.Text.Encoding.ASCII.GetBytes("0");
+                        stream.Write(first, 0, first.Length);
+                        System.Threading.Tasks.Task.Delay(20).Wait();
+                        byte[] rest = System.Text.Encoding.ASCII.GetBytes("4\r\n");
+                        stream.Write(rest, 0, rest.Length);
+                        return received.ToString();
+                    }
+                });
+                Type printerType = application.GetType("GodexIndustrial.LabelPrinter");
+                object printer = Activator.CreateInstance(printerType);
+                printerType.GetProperty("IpAddr").SetValue(printer, "127.0.0.1");
+                printerType.GetProperty("Port").SetValue(printer,
+                    ((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
+                var query = System.Threading.Tasks.Task.Run(() =>
+                    ((System.Threading.Tasks.Task<string>)printerType
+                        .GetMethod("QueryStatusAsync").Invoke(printer, null))
+                        .GetAwaiter().GetResult());
+                Check(query.GetAwaiter().GetResult() == "04", "Split TCP status reply is read completely");
+                string sent = statusReply.GetAwaiter().GetResult();
+                Check(sent == "~S,CHECK" + Environment.NewLine,
+                    "Status query sends only the GoDEX check command");
+            }
+            finally
+            {
+                listener.Stop();
+            }
             using (var form = (IDisposable)Activator.CreateInstance(application.GetType("GodexIndustrial.Form1")))
             {
                 Check(form != null, "Main form opens without a saved printer");
                 var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var statusLabel = (System.Windows.Forms.Label)form.GetType()
+                    .GetField("lblPrinterStatus", flags).GetValue(form);
+                Check(statusLabel.Parent.Name == "panelLogo",
+                    "Printer status appears below the app title");
+                form.GetType().GetField("_statusMonitoringStarted", flags).SetValue(form, true);
+                form.GetType().GetField("_lanAddressApplied", flags).SetValue(form, false);
+                var refreshStatus = form.GetType().GetMethod("RequestPrinterStatusRefresh", flags);
+                refreshStatus.Invoke(form, null);
+                Check(statusLabel.Text.Contains("click Apply"),
+                    "Unapplied default LAN address is not polled");
+                object uiPrinter = form.GetType().GetField("_printer", flags).GetValue(form);
+                uiPrinter.GetType().GetProperty("ConnType").SetValue(uiPrinter, 3);
+                uiPrinter.GetType().GetProperty("PrinterName").SetValue(uiPrinter, null);
+                refreshStatus.Invoke(form, null);
+                Check(statusLabel.Text.Contains("select printer"),
+                    "USB status asks for a printer selection");
+                uiPrinter.GetType().GetProperty("PrinterName").SetValue(uiPrinter, "Test queue");
+                refreshStatus.Invoke(form, null);
+                Check(statusLabel.Text.Contains("queue selected"),
+                    "USB status identifies a selected queue without claiming hardware readiness");
+                form.GetType().GetField("_statusMonitoringStarted", flags).SetValue(form, false);
                 var rotationList = (System.Windows.Forms.ComboBox)form.GetType()
                     .GetField("cmbRotation", flags).GetValue(form);
                 Check(rotationList.Items.Count == 4, "Rotation list has four options");

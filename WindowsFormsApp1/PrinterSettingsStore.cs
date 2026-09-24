@@ -8,6 +8,7 @@ namespace GodexIndustrial
     {
         public int ConnectionType { get; set; } = 1;
         public string IpAddress { get; set; } = "172.16.1.13";
+        public bool LanAddressApplied { get; set; }
         public string ComPort { get; set; }
         public int BaudRate { get; set; } = 9600;
         public string PrinterName { get; set; }

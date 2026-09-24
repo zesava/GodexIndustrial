@@ -48,6 +48,7 @@ namespace GodexIndustrial
             this.iconLabel = new FontAwesome.Sharp.IconButton();
             this.panelLogo = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
+            this.lblPrinterStatus = new System.Windows.Forms.Label();
             this.panelTitleBar = new System.Windows.Forms.Panel();
             this.btnMinimize = new FontAwesome.Sharp.IconButton();
             this.btnMaximize = new FontAwesome.Sharp.IconButton();
@@ -404,6 +405,7 @@ namespace GodexIndustrial
             // panelLogo
             // 
             this.panelLogo.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(32)))), ((int)(((byte)(89)))), ((int)(((byte)(83)))));
+            this.panelLogo.Controls.Add(this.lblPrinterStatus);
             this.panelLogo.Controls.Add(this.label2);
             this.panelLogo.Dock = System.Windows.Forms.DockStyle.Top;
             this.panelLogo.Location = new System.Drawing.Point(0, 0);
@@ -413,16 +415,30 @@ namespace GodexIndustrial
             // 
             // label2
             // 
-            this.label2.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.label2.Font = new System.Drawing.Font("Segoe UI Semibold", 14.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(204)));
+            this.label2.Font = new System.Drawing.Font("Segoe UI Semibold", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(204)));
             this.label2.ForeColor = System.Drawing.Color.Gainsboro;
-            this.label2.Location = new System.Drawing.Point(0, 0);
+            this.label2.Location = new System.Drawing.Point(0, 3);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(220, 50);
+            this.label2.Size = new System.Drawing.Size(220, 26);
             this.label2.TabIndex = 0;
             this.label2.Text = "Godex industrial";
             this.label2.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
-            // 
+            //
+            // lblPrinterStatus
+            //
+            this.lblPrinterStatus.AutoEllipsis = true;
+            this.lblPrinterStatus.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.lblPrinterStatus.Font = new System.Drawing.Font("Segoe UI", 9F);
+            this.lblPrinterStatus.ForeColor = System.Drawing.Color.Gainsboro;
+            this.lblPrinterStatus.Location = new System.Drawing.Point(8, 29);
+            this.lblPrinterStatus.Name = "lblPrinterStatus";
+            this.lblPrinterStatus.Size = new System.Drawing.Size(204, 18);
+            this.lblPrinterStatus.TabIndex = 1;
+            this.lblPrinterStatus.Text = "● Printer: checking...";
+            this.lblPrinterStatus.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            this.toolTip1.SetToolTip(this.lblPrinterStatus, "Click to refresh printer status");
+            this.lblPrinterStatus.Click += new System.EventHandler(this.lblPrinterStatus_Click);
+            //
             // panelTitleBar
             // 
             this.panelTitleBar.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(26)))), ((int)(((byte)(25)))), ((int)(((byte)(62)))));
@@ -1292,6 +1308,7 @@ namespace GodexIndustrial
         private System.Windows.Forms.TabPage tabPage5;
         private System.Windows.Forms.TextBox textBox1;
         private System.Windows.Forms.Label label2;
+        private System.Windows.Forms.Label lblPrinterStatus;
         private System.Windows.Forms.Panel panelPrint;
         private FontAwesome.Sharp.IconButton iconPrint;
         private FontAwesome.Sharp.IconButton iconButton3;

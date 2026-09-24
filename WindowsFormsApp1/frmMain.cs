@@ -26,7 +26,13 @@ namespace GodexIndustrial
         private EventLogger _logger;
         private bool _isUpdatingUI = false;
         private SavedPrinterSettings _settings;
+        private bool _lanAddressApplied;
         private bool _isPrinting;
+        private readonly Timer _printerStatusTimer;
+        private bool _statusMonitoringStarted;
+        private bool _statusCheckInProgress;
+        private bool _statusRefreshPending;
+        private int _statusGeneration;
         private readonly List<string[]> _labelRows = new List<string[]>();
         private bool _renderingRows;
 
@@ -79,6 +85,8 @@ namespace GodexIndustrial
         public Form1()
         {
             InitializeComponent();
+            _printerStatusTimer = new Timer(components) { Interval = 15000 };
+            _printerStatusTimer.Tick += (sender, args) => RequestPrinterStatusRefresh();
             leftBorderBtn = new Panel();
             leftBorderBtn.Size = new Size(7, 60);
             panelMenu.Controls.Add(leftBorderBtn);
@@ -92,9 +100,11 @@ namespace GodexIndustrial
             ActivateButton(iconLabel, RGBColors.color1);
 
             _settings = PrinterSettingsStore.Load();
+            _lanAddressApplied = _settings.LanAddressApplied;
             _printer.Port = port;
             _logger = new EventLogger(tbLog);
             tbIP.Text = _settings.IpAddress;
+            tbIP.TextChanged += (sender, args) => RequestPrinterStatusRefresh();
             cmbSerialPorts.SelectedIndexChanged += cmbSerialPorts_SelectedIndexChanged;
             cmbBaudRate.SelectedIndexChanged += cmbBaudRate_SelectedIndexChanged;
             cmbPrinters.SelectedIndexChanged += cmbPrinters_SelectedIndexChanged;
@@ -305,6 +315,13 @@ namespace GodexIndustrial
             myDataGridView.Enabled = !printing;
             cmbTemplate.Enabled = !printing;
             Cursor = printing ? Cursors.WaitCursor : Cursors.Default;
+            if (printing)
+            {
+                _statusGeneration++;
+                SetPrinterStatus("Printer: busy", Color.FromArgb(255, 219, 130),
+                    "Printing or calibration is in progress.");
+            }
+            else RequestPrinterStatusRefresh();
         }
 
         private void btnGenZPL_click(object sender, EventArgs e)
@@ -347,11 +364,125 @@ namespace GodexIndustrial
             try
             {
                 _printer.IpAddr = tbIP.Text.Trim();
+                _lanAddressApplied = true;
                 _logger.Log($"LAN address set to {_printer.IpAddr}.");
             }
             catch (Exception ex)
             {
                 ShowError("Invalid LAN address", ex);
+            }
+            finally
+            {
+                RequestPrinterStatusRefresh();
+            }
+        }
+
+        private void lblPrinterStatus_Click(object sender, EventArgs e)
+        {
+            RequestPrinterStatusRefresh();
+        }
+
+        private void SetPrinterStatus(string message, Color color, string details)
+        {
+            if (IsDisposed || Disposing) return;
+            lblPrinterStatus.Text = "● " + message;
+            lblPrinterStatus.ForeColor = color;
+            toolTip1.SetToolTip(lblPrinterStatus, details + Environment.NewLine + "Click to refresh.");
+        }
+
+        private void RequestPrinterStatusRefresh()
+        {
+            if (!_statusMonitoringStarted || IsDisposed || Disposing) return;
+            int generation = ++_statusGeneration;
+            if (_isPrinting)
+            {
+                SetPrinterStatus("Printer: busy", Color.FromArgb(255, 219, 130),
+                    "Printing or calibration is in progress.");
+                return;
+            }
+
+            int connectionType = _printer.ConnType;
+            if (connectionType == 3)
+            {
+                if (string.IsNullOrWhiteSpace(_printer.PrinterName))
+                    SetPrinterStatus("USB: select printer", Color.FromArgb(255, 219, 130),
+                        "Choose an installed Windows printer.");
+                else
+                    SetPrinterStatus("USB: queue selected", Color.FromArgb(255, 219, 130),
+                        "Windows queue: " + _printer.PrinterName +
+                        ". Physical printer status is unavailable through RAW printing.");
+                return;
+            }
+            if (connectionType == 1 &&
+                (!_lanAddressApplied || string.IsNullOrWhiteSpace(_printer.IpAddr) ||
+                 !string.Equals(tbIP.Text.Trim(), _printer.IpAddr, StringComparison.Ordinal)))
+            {
+                SetPrinterStatus("LAN: click Apply", Color.FromArgb(255, 219, 130),
+                    "Apply the IPv4 address before checking printer status.");
+                return;
+            }
+            if (connectionType == 2 && string.IsNullOrWhiteSpace(_printer.ComPortName))
+            {
+                SetPrinterStatus("COM: select port", Color.FromArgb(255, 219, 130),
+                    "Choose a COM port before checking printer status.");
+                return;
+            }
+            if (connectionType != 1 && connectionType != 2)
+            {
+                SetPrinterStatus("Printer: no connection", Color.FromArgb(255, 219, 130),
+                    "Choose a printer connection type.");
+                return;
+            }
+            if (_statusCheckInProgress)
+            {
+                _statusRefreshPending = true;
+                SetPrinterStatus("Printer: checking...", Color.Gainsboro,
+                    "Waiting for the previous status query to finish.");
+                return;
+            }
+
+            _statusCheckInProgress = true;
+            SetPrinterStatus("Printer: checking...", Color.Gainsboro,
+                "Requesting the current status from the printer.");
+            _ = CheckPrinterStatusAsync(generation, connectionType);
+        }
+
+        private async Task CheckPrinterStatusAsync(int generation, int connectionType)
+        {
+            string connection = connectionType == 1 ? "LAN" : "COM";
+            try
+            {
+                string response = await _printer.QueryStatusAsync();
+                if (!_statusMonitoringStarted || IsDisposed || Disposing ||
+                    generation != _statusGeneration) return;
+
+                PrinterStatusInfo status = PrinterStatusInfo.Parse(response);
+                Color color = status.Kind == PrinterStatusKind.Ready
+                    ? Color.FromArgb(144, 238, 175)
+                    : status.Kind == PrinterStatusKind.Error
+                        ? Color.FromArgb(255, 155, 155)
+                        : Color.FromArgb(255, 219, 130);
+                string reply = new string((response ?? string.Empty)
+                    .Where(character => !char.IsControl(character)).Take(80).ToArray());
+                SetPrinterStatus(connection + ": " + status.Description, color,
+                    "GoDEX status code: " + (status.Code ?? "unknown") +
+                    (reply.Length == 0 ? string.Empty : Environment.NewLine + "Reply: " + reply));
+            }
+            catch (Exception ex)
+            {
+                if (_statusMonitoringStarted && !IsDisposed && !Disposing &&
+                    generation == _statusGeneration)
+                    SetPrinterStatus(connection + ": no response", Color.FromArgb(255, 155, 155),
+                        ex.Message);
+            }
+            finally
+            {
+                _statusCheckInProgress = false;
+                if (_statusRefreshPending && _statusMonitoringStarted && !IsDisposed && !Disposing)
+                {
+                    _statusRefreshPending = false;
+                    RequestPrinterStatusRefresh();
+                }
             }
         }
 
@@ -373,11 +504,15 @@ namespace GodexIndustrial
             {
                 tbIP.Text = "172.16.1.13";
                 _printer.IpAddr = tbIP.Text;
+                _lanAddressApplied = false;
                 _logger.Log($"Saved LAN address ignored: {ex.Message}");
             }
             if (_settings.ConnectionType == 2) radioButton2.Checked = true;
             else if (_settings.ConnectionType == 3) radioButton3.Checked = true;
             else radioButton1.Checked = true;
+            _statusMonitoringStarted = true;
+            _printerStatusTimer.Start();
+            RequestPrinterStatusRefresh();
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
@@ -389,10 +524,14 @@ namespace GodexIndustrial
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+            _statusMonitoringStarted = false;
+            _statusGeneration++;
+            _printerStatusTimer.Stop();
             try
             {
                 _settings.ConnectionType = _printer.ConnType;
                 _settings.IpAddress = _printer.IpAddr;
+                _settings.LanAddressApplied = _lanAddressApplied;
                 _settings.ComPort = _printer.ComPortName;
                 _settings.BaudRate = _printer.BaudRate;
                 _settings.PrinterName = _printer.PrinterName;
@@ -407,27 +546,41 @@ namespace GodexIndustrial
 
         private void radioButton1_CheckedChanged(object sender, EventArgs e)
         {
-            if (radioButton1.Checked) _printer.ConnType = 1;
+            if (radioButton1.Checked)
+            {
+                _printer.ConnType = 1;
+                RequestPrinterStatusRefresh();
+            }
         }
 
         private void radioButton2_CheckedChanged(object sender, EventArgs e)
         {
-            if (radioButton2.Checked) _printer.ConnType = 2;
+            if (radioButton2.Checked)
+            {
+                _printer.ConnType = 2;
+                RequestPrinterStatusRefresh();
+            }
         }
 
         private void radioButton3_CheckedChanged(object sender, EventArgs e)
         {
-            if (radioButton3.Checked) _printer.ConnType = 3;
+            if (radioButton3.Checked)
+            {
+                _printer.ConnType = 3;
+                RequestPrinterStatusRefresh();
+            }
         }
 
         private void cmbSerialPorts_SelectedIndexChanged(object sender, EventArgs e)
         {
             _printer.ComPortName = cmbSerialPorts.SelectedItem as string;
+            RequestPrinterStatusRefresh();
         }
 
         private void cmbBaudRate_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (int.TryParse(cmbBaudRate.SelectedItem as string, out int baud)) _printer.BaudRate = baud;
+            RequestPrinterStatusRefresh();
         }
 
         private void PopulatePrinterList()
@@ -444,6 +597,7 @@ namespace GodexIndustrial
         private void cmbPrinters_SelectedIndexChanged(object sender, EventArgs e)
         {
             _printer.PrinterName = cmbPrinters.SelectedItem as string;
+            RequestPrinterStatusRefresh();
         }
 
         private void cmbTemplate_SelectedIndexChanged(object sender, EventArgs e)
