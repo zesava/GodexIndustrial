@@ -72,6 +72,8 @@
     <Compile Include="PrinterSettingsStore.cs" />
     <Compile Include="PrinterSelection.cs" />
     <Compile Include="PrinterStatusInfo.cs" />
+    <Compile Include="PrinterFontCatalog.cs" />
+    <Compile Include="InstalledFontData.cs" />
     <Compile Include="LabelDataParser.cs" />
     <Compile Include="LabelCommandBuilder.cs" />
     <Compile Include="LabelRotation.cs" />

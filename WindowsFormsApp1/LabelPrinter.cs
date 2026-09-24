@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.IO;
 using System.IO.Ports;
+using System.Globalization;
 using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -153,6 +154,206 @@ namespace GodexIndustrial
                 client.Close();
                 throw;
             }
+        }
+
+        public async Task<string> UploadFontAsync(byte[] data, string fontName, char slot,
+            IProgress<int> progress = null)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            if (data.Length < 12 ||
+                !((data[0] == 0 && data[1] == 1 && data[2] == 0 && data[3] == 0) ||
+                  (data[0] == 't' && data[1] == 'r' && data[2] == 'u' && data[3] == 'e')))
+                throw new InvalidDataException("The selected font is not a supported TrueType font.");
+            if (slot < 'A' || slot > 'Z')
+                throw new ArgumentOutOfRangeException(nameof(slot), "Font slot must be A–Z.");
+
+            string name = new string((fontName ?? string.Empty)
+                .Where(character => (character >= 'A' && character <= 'Z') ||
+                                    (character >= 'a' && character <= 'z') ||
+                                    (character >= '0' && character <= '9')).ToArray());
+            if (name.Length == 0) name = "Font" + slot;
+
+            await _operations.WaitAsync();
+            try
+            {
+                ValidateConnection();
+                int type = ConnType;
+                if (type == 3)
+                    throw new NotSupportedException(
+                        "Font upload through the Windows USB print queue is unavailable. Use LAN or COM.");
+                string ip = IpAddr, com = ComPortName;
+                int port = Port, baud = BaudRate;
+                return await Task.Run(() =>
+                {
+                    byte[] header = Encoding.ASCII.GetBytes("~H,TTF," + slot + name + "," +
+                        data.Length.ToString(CultureInfo.InvariantCulture) + "\r");
+                    using (var font = new MemoryStream(data, false))
+                        SendFont(header, font, type, ip, port, com, baud, progress);
+                    return slot + ": " + name;
+                });
+            }
+            finally
+            {
+                _operations.Release();
+            }
+        }
+        private static void SendFont(byte[] header, Stream font, int type,
+            string ip, int port, string com, int baud, IProgress<int> progress)
+        {
+            if (type == 1)
+            {
+                using (var client = Connect(ip, port))
+                using (var stream = client.GetStream())
+                {
+                    stream.WriteTimeout = 5000;
+                    WriteFontBytes((bytes, offset, count) =>
+                        stream.Write(bytes, offset, count), header, font, 16 * 1024, progress);
+                    stream.Flush();
+                }
+            }
+            else
+            {
+                using (var serial = new SerialPort(com, baud, Parity.None, 8, StopBits.One))
+                {
+                    serial.Handshake = Handshake.None;
+                    serial.WriteTimeout = 5000;
+                    serial.Open();
+                    WriteFontBytes((bytes, offset, count) =>
+                        serial.Write(bytes, offset, count), header, font, 512, progress);
+                }
+            }
+        }
+        private static void WriteFontBytes(Action<byte[], int, int> write,
+            byte[] header, Stream font, int chunkSize, IProgress<int> progress)
+        {
+            write(header, 0, header.Length);
+            byte[] buffer = new byte[chunkSize];
+            long sent = 0;
+            int reported = -1;
+            int count;
+            while ((count = font.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                write(buffer, 0, count);
+                sent += count;
+                int percent = (int)(sent * 100 / font.Length);
+                if (percent != reported)
+                {
+                    progress?.Report(percent);
+                    reported = percent;
+                }
+            }
+        }
+
+        public async Task DeleteFontAsync(PrinterFontInfo font)
+        {
+            if (font == null) throw new ArgumentNullException(nameof(font));
+            if (!font.TryBuildDeleteCommand(out string command))
+                throw new ArgumentException("The selected font has no valid printer ID.", nameof(font));
+
+            await _operations.WaitAsync();
+            try
+            {
+                ValidateConnection();
+                int type = ConnType;
+                if (type == 3)
+                    throw new NotSupportedException(
+                        "Font deletion through the Windows USB print queue is unavailable. Use LAN or COM.");
+                string ip = IpAddr, com = ComPortName;
+                int port = Port, baud = BaudRate;
+                await Task.Run(() => Send(command + Environment.NewLine,
+                    type, ip, port, com, baud, null));
+            }
+            finally
+            {
+                _operations.Release();
+            }
+        }
+
+        public async Task<PrinterFontCatalog> QueryPrinterFontsAsync()
+        {
+            await _operations.WaitAsync();
+            try
+            {
+                ValidateConnection();
+                int type = ConnType;
+                if (type == 3)
+                    throw new NotSupportedException(
+                        "The Windows USB print queue cannot read printer font listings. Use LAN or COM.");
+                string ip = IpAddr, com = ComPortName;
+                int port = Port, baud = BaudRate;
+                return await Task.Run(() =>
+                    PrinterFontCatalog.ParseDirectory(
+                        QueryMemoryDirectory(type, ip, port, com, baud)));
+            }
+            finally
+            {
+                _operations.Release();
+            }
+        }
+
+        private static string QueryMemoryDirectory(int type, string ip, int port,
+            string com, int baud)
+        {
+            const string command = "~MDIR";
+            if (type == 1)
+            {
+                using (var client = Connect(ip, port))
+                using (var stream = client.GetStream())
+                {
+                    stream.ReadTimeout = 750;
+                    stream.WriteTimeout = 3000;
+                    byte[] bytes = Encoding.ASCII.GetBytes(command + Environment.NewLine);
+                    stream.Write(bytes, 0, bytes.Length);
+                    return ReadMemoryDirectory((buffer, offset, count) =>
+                        stream.Read(buffer, offset, count));
+                }
+            }
+
+            using (var serial = new SerialPort(com, baud, Parity.None, 8, StopBits.One))
+            {
+                serial.Handshake = Handshake.None;
+                serial.ReadTimeout = 750;
+                serial.WriteTimeout = 3000;
+                serial.Open();
+                serial.WriteLine(command);
+                return ReadMemoryDirectory((buffer, offset, count) =>
+                    serial.Read(buffer, offset, count));
+            }
+        }
+
+        private static string ReadMemoryDirectory(Func<byte[], int, int, int> read)
+        {
+            var reply = new StringBuilder();
+            var buffer = new byte[4096];
+            DateTime deadline = DateTime.UtcNow.AddSeconds(6);
+            DateTime lastByte = DateTime.UtcNow;
+            while (DateTime.UtcNow < deadline && reply.Length < 65536)
+            {
+                try
+                {
+                    int count = read(buffer, 0, buffer.Length);
+                    if (count == 0) break;
+                    reply.Append(Encoding.ASCII.GetString(buffer, 0, count));
+                    lastByte = DateTime.UtcNow;
+                }
+                catch (TimeoutException)
+                {
+                    if (reply.Length > 0 && (DateTime.UtcNow - lastByte).TotalMilliseconds >= 1500)
+                        break;
+                }
+                catch (IOException ex)
+                {
+                    var socketError = ex.InnerException as SocketException;
+                    if (socketError == null || socketError.SocketErrorCode != SocketError.TimedOut)
+                        throw;
+                    if (reply.Length > 0 && (DateTime.UtcNow - lastByte).TotalMilliseconds >= 1500)
+                        break;
+                }
+            }
+
+            if (reply.Length == 0)
+                throw new TimeoutException("Printer did not respond to the memory directory request.");
+            return reply.ToString();
         }
 
         public async Task<string> QueryStatusAsync()

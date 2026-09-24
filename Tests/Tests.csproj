@@ -28,6 +28,7 @@
     <Compile Include="..\WindowsFormsApp1\PreviewGeometry.cs"><Link>PreviewGeometry.cs</Link></Compile>
     <Compile Include="..\WindowsFormsApp1\PrinterSelection.cs"><Link>PrinterSelection.cs</Link></Compile>
     <Compile Include="..\WindowsFormsApp1\PrinterStatusInfo.cs"><Link>PrinterStatusInfo.cs</Link></Compile>
+    <Compile Include="..\WindowsFormsApp1\PrinterFontCatalog.cs"><Link>PrinterFontCatalog.cs</Link></Compile>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

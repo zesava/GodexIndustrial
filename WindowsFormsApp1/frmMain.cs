@@ -19,7 +19,6 @@ namespace GodexIndustrial
 
 
         //Fields
-        int port = 9100;
         LabelPrinter _printer = new LabelPrinter();
         List<LabelTemplate> _templates = new List<LabelTemplate>();
         LabelTemplate _currentTemplate;
@@ -35,6 +34,14 @@ namespace GodexIndustrial
         private int _statusGeneration;
         private readonly List<string[]> _labelRows = new List<string[]>();
         private bool _renderingRows;
+        private ListView _fontsList;
+        private Label _fontsStatus;
+        private Button _refreshFontsButton;
+        private Button _uploadFontButton;
+        private Button _deleteFontButton;
+        private bool _fontsLoading;
+        private bool _fontCatalogLoaded;
+        private int _fontConnectionGeneration;
 
 
         protected override void WndProc(ref Message m)
@@ -85,6 +92,10 @@ namespace GodexIndustrial
         public Form1()
         {
             InitializeComponent();
+            btnRefreshPrinterFonts.Click += async (sender, args) => await RefreshFontsAsync();
+            cmbPrinterFont.SelectedIndexChanged += (sender, args) => UpdateSelectedFontHint();
+            toolTip1.SetToolTip(btnRefreshPrinterFonts, "Прочитати список шрифтів з принтера.");
+            InitializeFontsPage();
             _printerStatusTimer = new Timer(components) { Interval = 15000 };
             _printerStatusTimer.Tick += (sender, args) => RequestPrinterStatusRefresh();
             leftBorderBtn = new Panel();
@@ -101,10 +112,13 @@ namespace GodexIndustrial
 
             _settings = PrinterSettingsStore.Load();
             _lanAddressApplied = _settings.LanAddressApplied;
-            _printer.Port = port;
             _logger = new EventLogger(tbLog);
             tbIP.Text = _settings.IpAddress;
-            tbIP.TextChanged += (sender, args) => RequestPrinterStatusRefresh();
+            tbIP.TextChanged += (sender, args) =>
+            {
+                InvalidatePrinterFontChoices();
+                RequestPrinterStatusRefresh();
+            };
             cmbSerialPorts.SelectedIndexChanged += cmbSerialPorts_SelectedIndexChanged;
             cmbBaudRate.SelectedIndexChanged += cmbBaudRate_SelectedIndexChanged;
             cmbPrinters.SelectedIndexChanged += cmbPrinters_SelectedIndexChanged;
@@ -127,6 +141,486 @@ namespace GodexIndustrial
             };
         }
 
+        private void InitializeFontsPage()
+        {
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                Padding = new Padding(18)
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+
+            var header = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 4,
+                RowCount = 1
+            };
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140F));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120F));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140F));
+            header.Controls.Add(new Label
+            {
+                Text = "Printer fonts",
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft
+            }, 0, 0);
+            _uploadFontButton = new Button
+            {
+                Text = "Завантажити",
+                Size = new Size(128, 36),
+                Anchor = AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(32, 89, 83),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10F)
+            };
+            _uploadFontButton.FlatAppearance.BorderSize = 0;
+            _uploadFontButton.Click += UploadFont_Click;
+            toolTip1.SetToolTip(_uploadFontButton,
+                "Вибрати встановлений шрифт Windows і завантажити його у принтер.");
+            header.Controls.Add(_uploadFontButton, 1, 0);
+            _deleteFontButton = new Button
+            {
+                Text = "Видалити",
+                Size = new Size(108, 36),
+                Anchor = AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(185, 62, 54),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10F),
+                Enabled = false
+            };
+            _deleteFontButton.FlatAppearance.BorderSize = 0;
+            _deleteFontButton.Click += DeleteFont_Click;
+            toolTip1.SetToolTip(_deleteFontButton,
+                "Видалити вибраний шрифт із пам’яті принтера.");
+            header.Controls.Add(_deleteFontButton, 2, 0);
+            _refreshFontsButton = new Button
+            {
+                Text = "Оновити",
+                Size = new Size(120, 36),
+                Anchor = AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(255, 128, 0),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10F)
+            };
+            _refreshFontsButton.FlatAppearance.BorderSize = 0;
+            _refreshFontsButton.Click += async (sender, args) => await RefreshFontsAsync();
+            header.Controls.Add(_refreshFontsButton, 3, 0);
+
+            _fontsStatus = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "Натисніть «Оновити» для списку або «Завантажити», щоб вибрати шрифт Windows.",
+                TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = Color.DimGray,
+                Font = new Font("Segoe UI", 9F)
+            };
+            _fontsList = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                MultiSelect = false,
+                GridLines = true,
+                HideSelection = false,
+                Font = new Font("Segoe UI", 10F),
+                UseCompatibleStateImageBehavior = false
+            };
+            _fontsList.Columns.Add("Type", 100);
+            _fontsList.Columns.Add("File Name", 300);
+            _fontsList.Columns.Add("File Size", 100);
+            _fontsList.Groups.Add(new ListViewGroup("FNT", HorizontalAlignment.Left) { Name = "FNT" });
+            _fontsList.Groups.Add(new ListViewGroup("TTF", HorizontalAlignment.Left) { Name = "TTF" });
+            _fontsList.SelectedIndexChanged += (sender, args) => UpdateDeleteFontButton();
+
+            layout.Controls.Add(header, 0, 0);
+            layout.Controls.Add(_fontsList, 0, 1);
+            layout.Controls.Add(_fontsStatus, 0, 2);
+            tabFonts.Controls.Add(layout);
+        }
+
+        private void iconFonts_Click(object sender, EventArgs e)
+        {
+            ActivateButton(sender, RGBColors.color1);
+            tabControl1.SelectedTab = tabFonts;
+        }
+
+        private bool FontConnectionReady()
+        {
+            if (_printer.ConnType == 3)
+            {
+                _fontsStatus.Text = "Для керування шрифтами виберіть LAN або COM.";
+                return false;
+            }
+            if (_printer.ConnType == 1 &&
+                (!_lanAddressApplied || string.IsNullOrWhiteSpace(_printer.IpAddr) ||
+                 !string.Equals(tbIP.Text.Trim(), _printer.IpAddr, StringComparison.Ordinal)))
+            {
+                _fontsStatus.Text = "Спочатку застосуйте LAN-адресу у Printer connection.";
+                return false;
+            }
+            try
+            {
+                _printer.ValidateConnection();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _fontsStatus.Text = ex.Message;
+                return false;
+            }
+        }
+
+        private void InvalidatePrinterFontChoices()
+        {
+            _fontConnectionGeneration++;
+            _fontCatalogLoaded = false;
+            _fontsList.Items.Clear();
+            _fontsStatus.Text = "Підключення змінено. Натисніть «Оновити» для нового списку.";
+            UpdateDeleteFontButton();
+            cmbPrinterFont.Items.Clear();
+            cmbPrinterFont.Items.Add("A (без перевірки)");
+            cmbPrinterFont.SelectedIndex = 0;
+            lblPrinterFontHint.Text = "Натисніть ↻, щоб прочитати шрифти принтера.";
+        }
+
+        private void UpdateSelectedFontHint()
+        {
+            var font = cmbPrinterFont.SelectedItem as PrinterFontInfo;
+            if (font == null)
+            {
+                lblPrinterFontHint.Text = _fontCatalogLoaded
+                    ? "Виберіть шрифт зі списку принтера."
+                    : "Натисніть ↻, щоб прочитати шрифти принтера.";
+                return;
+            }
+
+            lblPrinterFontHint.Text = font.Type == "FNT"
+                ? "FNT: фіксований розмір bitmap-шрифту."
+                : "TTF: розмір задається полем Font size.";
+        }
+
+        private void PopulatePrinterFontChoices(PrinterFontCatalog catalog)
+        {
+            var previous = cmbPrinterFont.SelectedItem as PrinterFontInfo;
+            bool hadCatalog = _fontCatalogLoaded;
+            cmbPrinterFont.BeginUpdate();
+            try
+            {
+                cmbPrinterFont.Items.Clear();
+                foreach (PrinterFontInfo font in catalog.Fonts)
+                    if (font.TryGetPrintSlot(out _))
+                        cmbPrinterFont.Items.Add(font);
+
+                int selected = -1;
+                if (hadCatalog && previous != null)
+                {
+                    for (int i = 0; i < cmbPrinterFont.Items.Count; i++)
+                    {
+                        var candidate = (PrinterFontInfo)cmbPrinterFont.Items[i];
+                        if (candidate.Type == previous.Type && candidate.Name == previous.Name)
+                        {
+                            selected = i;
+                            break;
+                        }
+                    }
+                }
+                else if (!hadCatalog)
+                {
+                    for (int i = 0; i < cmbPrinterFont.Items.Count; i++)
+                    {
+                        var candidate = (PrinterFontInfo)cmbPrinterFont.Items[i];
+                        if (candidate.Type == "TTF" &&
+                            candidate.TryGetPrintSlot(out char slot) && slot == 'A')
+                        {
+                            selected = i;
+                            break;
+                        }
+                    }
+                    if (selected < 0)
+                    {
+                        for (int i = 0; i < cmbPrinterFont.Items.Count; i++)
+                            if (((PrinterFontInfo)cmbPrinterFont.Items[i]).Type == "TTF")
+                            {
+                                selected = i;
+                                break;
+                            }
+                    }
+                    if (selected < 0 && cmbPrinterFont.Items.Count > 0) selected = 0;
+                }
+
+                _fontCatalogLoaded = true;
+                cmbPrinterFont.SelectedIndex = selected;
+            }
+            finally
+            {
+                cmbPrinterFont.EndUpdate();
+            }
+            UpdateSelectedFontHint();
+        }
+
+        private void ShowFontCatalog(PrinterFontCatalog catalog)
+        {
+            _fontsList.BeginUpdate();
+            try
+            {
+                _fontsList.Items.Clear();
+                foreach (PrinterFontInfo font in catalog.Fonts)
+                {
+                    var item = new ListViewItem(font.Type) { Tag = font };
+                    item.SubItems.Add(font.Name);
+                    item.SubItems.Add(string.IsNullOrEmpty(font.Size) ? "—" : font.Size);
+                    item.Group = _fontsList.Groups[font.Type];
+                    _fontsList.Items.Add(item);
+                }
+            }
+            finally
+            {
+                _fontsList.EndUpdate();
+            }
+
+            PopulatePrinterFontChoices(catalog);
+            _fontsStatus.Text = catalog.Fonts.Count + " font(s)" +
+                (string.IsNullOrEmpty(catalog.FreeMemoryKb)
+                    ? string.Empty : "  •  Free flash memory: " + catalog.FreeMemoryKb + " KB") +
+                "  •  — means the printer did not report a file size.";
+        }
+
+        private void UpdateDeleteFontButton()
+        {
+            if (_deleteFontButton == null || _fontsList == null) return;
+            PrinterFontInfo selected = _fontsList.SelectedItems.Count == 1
+                ? _fontsList.SelectedItems[0].Tag as PrinterFontInfo : null;
+            _deleteFontButton.Enabled = !_fontsLoading && !_isPrinting &&
+                selected != null && selected.TryBuildDeleteCommand(out _);
+        }
+
+        private async Task RefreshFontsAsync()
+        {
+            if (_fontsLoading || _isPrinting) return;
+            if (!FontConnectionReady())
+            {
+                lblPrinterFontHint.Text = _fontsStatus.Text;
+                return;
+            }
+
+            int generation = _fontConnectionGeneration;
+            _fontsLoading = true;
+            btnRefreshPrinterFonts.Enabled = false;
+            _refreshFontsButton.Enabled = false;
+            _uploadFontButton.Enabled = false;
+            _deleteFontButton.Enabled = false;
+            _fontsStatus.Text = "Reading font list from printer...";
+            lblPrinterFontHint.Text = "Читаємо шрифти принтера...";
+            try
+            {
+                PrinterFontCatalog catalog = await _printer.QueryPrinterFontsAsync();
+                if (IsDisposed || Disposing || generation != _fontConnectionGeneration) return;
+                ShowFontCatalog(catalog);
+            }
+            catch (Exception ex)
+            {
+                if (IsDisposed || Disposing || generation != _fontConnectionGeneration) return;
+                _fontsStatus.Text = "Cannot read printer fonts: " + ex.Message;
+                lblPrinterFontHint.Text = "Не вдалося прочитати шрифти принтера.";
+                _logger.Log("Font list: " + ex.Message);
+            }
+            finally
+            {
+                _fontsLoading = false;
+                if (!IsDisposed && !Disposing)
+                {
+                    _refreshFontsButton.Enabled = true;
+                    btnRefreshPrinterFonts.Enabled = true;
+                    _uploadFontButton.Enabled = true;
+                    UpdateDeleteFontButton();
+                }
+            }
+        }
+
+        private async void DeleteFont_Click(object sender, EventArgs e)
+        {
+            if (_fontsLoading || _isPrinting || _fontsList.SelectedItems.Count != 1)
+                return;
+            PrinterFontInfo selected = _fontsList.SelectedItems[0].Tag as PrinterFontInfo;
+            if (selected == null || !selected.TryBuildDeleteCommand(out string command) ||
+                !FontConnectionReady())
+                return;
+
+            if (MessageBox.Show(this,
+                "Видалити шрифт «" + selected.Name + "» з пам’яті принтера?",
+                "Підтвердження видалення",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+
+            bool sent = false;
+            _fontsLoading = true;
+            _refreshFontsButton.Enabled = false;
+            _uploadFontButton.Enabled = false;
+            _deleteFontButton.Enabled = false;
+            SetPrinting(true);
+            try
+            {
+                _fontsStatus.Text = "Перевіряю вибраний шрифт у пам’яті принтера...";
+                PrinterFontCatalog before = await _printer.QueryPrinterFontsAsync();
+                if (IsDisposed || Disposing) return;
+                if (!before.Fonts.Any(font => font.Type == selected.Type &&
+                    string.Equals(font.Name, selected.Name, StringComparison.Ordinal)))
+                {
+                    ShowFontCatalog(before);
+                    _fontsStatus.Text = "Вибраного шрифту вже немає. Список оновлено.";
+                    return;
+                }
+
+                _fontsStatus.Text = "Видаляю " + selected.Name + "...";
+                await _printer.DeleteFontAsync(selected);
+                sent = true;
+                _logger.Log("Font delete command sent: " + command + ".");
+
+                PrinterFontCatalog after = null;
+                bool removed = false;
+                for (int attempt = 0; attempt < 3 && !removed; attempt++)
+                {
+                    await Task.Delay(700);
+                    after = await _printer.QueryPrinterFontsAsync();
+                    removed = !after.Fonts.Any(font => font.Type == selected.Type &&
+                        string.Equals(font.Name, selected.Name, StringComparison.Ordinal));
+                }
+                if (IsDisposed || Disposing) return;
+                ShowFontCatalog(after);
+                _fontsStatus.Text = removed
+                    ? "Видалено: " + selected.Name + "."
+                    : "Команду видалення надіслано, але шрифт ще є в каталозі. Натисніть «Оновити».";
+            }
+            catch (Exception ex)
+            {
+                if (IsDisposed || Disposing) return;
+                _fontsStatus.Text = sent
+                    ? "Команду видалення надіслано, але не вдалося перевірити результат: " + ex.Message
+                    : "Не вдалося видалити шрифт: " + ex.Message;
+                _logger.Log(_fontsStatus.Text);
+            }
+            finally
+            {
+                _fontsLoading = false;
+                if (!IsDisposed && !Disposing)
+                {
+                    _refreshFontsButton.Enabled = true;
+                    btnRefreshPrinterFonts.Enabled = true;
+                    _uploadFontButton.Enabled = true;
+                    SetPrinting(false);
+                    UpdateDeleteFontButton();
+                }
+            }
+        }
+
+        private async void UploadFont_Click(object sender, EventArgs e)
+        {
+            if (_fontsLoading || _isPrinting || !FontConnectionReady()) return;
+
+            byte[] fontData;
+            string selectedName;
+            try
+            {
+                using (var dialog = new FontDialog
+                {
+                    FontMustExist = true,
+                    AllowSimulations = false,
+                    ShowEffects = false,
+                    ShowColor = false
+                })
+                {
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    using (var selectedFont = (Font)dialog.Font.Clone())
+                    {
+                        selectedName = selectedFont.FontFamily.Name +
+                            (selectedFont.Bold ? "Bold" : string.Empty) +
+                            (selectedFont.Italic ? "Italic" : string.Empty);
+                        fontData = InstalledFontData.ReadTrueType(selectedFont);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _fontsStatus.Text = "Не вдалося прочитати шрифт Windows: " + ex.Message;
+                ShowError("Шрифт не підтримується", ex);
+                return;
+            }
+
+            bool sent = false;
+            string uploadedName = null;
+            _fontsLoading = true;
+            _refreshFontsButton.Enabled = false;
+            _uploadFontButton.Enabled = false;
+            _deleteFontButton.Enabled = false;
+            SetPrinting(true);
+            try
+            {
+                _fontsStatus.Text = "Перевіряю вільні слоти шрифтів...";
+                PrinterFontCatalog before = await _printer.QueryPrinterFontsAsync();
+                if (IsDisposed || Disposing) return;
+                char slot = before.FindAvailableSlot("TTF");
+
+                _fontsStatus.Text = "Завантажую " + selectedName + " у слот " + slot + "...";
+                var progress = new Progress<int>(percent =>
+                {
+                    if (!sent && !IsDisposed && !Disposing)
+                        _fontsStatus.Text = "Завантажую " + selectedName +
+                            " у слот " + slot + ": " + percent + "%";
+                });
+                uploadedName = await _printer.UploadFontAsync(fontData, selectedName, slot, progress);
+                sent = true;
+                _logger.Log("Font data sent: " + uploadedName + ".");
+
+                PrinterFontCatalog after = null;
+                bool found = false;
+                for (int attempt = 0; attempt < 3 && !found; attempt++)
+                {
+                    await Task.Delay(900);
+                    after = await _printer.QueryPrinterFontsAsync();
+                    found = after.Fonts.Any(font => font.Type == "TTF" &&
+                        font.Name.Length > 0 &&
+                        char.ToUpperInvariant(font.Name[0]) == slot);
+                }
+                if (IsDisposed || Disposing) return;
+                ShowFontCatalog(after);
+                _fontsStatus.Text = found
+                    ? "Завантажено: " + uploadedName + "."
+                    : "Дані передано, але шрифт ще не з’явився у каталозі. Натисніть «Оновити».";
+            }
+            catch (Exception ex)
+            {
+                if (IsDisposed || Disposing) return;
+                _fontsStatus.Text = sent
+                    ? "Дані передано, але не вдалося перевірити каталог: " + ex.Message
+                    : "Не вдалося завантажити шрифт: " + ex.Message;
+                _logger.Log(_fontsStatus.Text);
+            }
+            finally
+            {
+                _fontsLoading = false;
+                if (!IsDisposed && !Disposing)
+                {
+                    _refreshFontsButton.Enabled = true;
+                    btnRefreshPrinterFonts.Enabled = true;
+                    _uploadFontButton.Enabled = true;
+                    UpdateDeleteFontButton();
+                    SetPrinting(false);
+                }
+            }
+        }
+
         private void HookSyncEvents()
         {
             tbFontSize.TextChanged += (s, e) => SyncTemplateWithUI();
@@ -144,10 +638,6 @@ namespace GodexIndustrial
         {
             public static Color color1 = Color.FromArgb(255, 128, 0);
             public static Color color2 = Color.FromArgb(119, 157, 202);
-            public static Color color3 = Color.FromArgb(253, 138, 114);
-            public static Color color4 = Color.FromArgb(95, 77, 221);
-            public static Color color5 = Color.FromArgb(249, 88, 155);
-            public static Color color6 = Color.FromArgb(24, 161, 251);
         }
         private void ActivateButton(object senderBtn, Color color)
         {
@@ -280,7 +770,10 @@ namespace GodexIndustrial
             if (_currentTemplate == null) throw new InvalidOperationException("Select a template first.");
             myDataGridView.EndEdit();
             SyncTemplateWithUI();
-            return LabelCommandBuilder.Build(_currentTemplate, GetLabelRows());
+            if (_fontCatalogLoaded && !(cmbPrinterFont.SelectedItem is PrinterFontInfo))
+                throw new InvalidOperationException("Виберіть завантажений шрифт принтера або оновіть список.");
+            return LabelCommandBuilder.Build(_currentTemplate, GetLabelRows(),
+                cmbPrinterFont.SelectedItem as PrinterFontInfo);
         }
 
         private async void PrintLabels(object sender, EventArgs e)
@@ -310,10 +803,19 @@ namespace GodexIndustrial
         private void SetPrinting(bool printing)
         {
             _isPrinting = printing;
+            UpdateDeleteFontButton();
             iconPrint.Enabled = !printing;
             iconCalibtate.Enabled = !printing;
             myDataGridView.Enabled = !printing;
             cmbTemplate.Enabled = !printing;
+            cmbPrinterFont.Enabled = !printing;
+            btnRefreshPrinterFonts.Enabled = !printing && !_fontsLoading;
+            _refreshFontsButton.Enabled = !printing && !_fontsLoading;
+            _uploadFontButton.Enabled = !printing && !_fontsLoading;
+            groupBox1.Enabled = !printing;
+            groupBox2.Enabled = !printing;
+            groupBox3.Enabled = !printing;
+            groupBox5.Enabled = !printing;
             Cursor = printing ? Cursors.WaitCursor : Cursors.Default;
             if (printing)
             {
@@ -365,6 +867,7 @@ namespace GodexIndustrial
             {
                 _printer.IpAddr = tbIP.Text.Trim();
                 _lanAddressApplied = true;
+                InvalidatePrinterFontChoices();
                 _logger.Log($"LAN address set to {_printer.IpAddr}.");
             }
             catch (Exception ex)
@@ -549,6 +1052,7 @@ namespace GodexIndustrial
             if (radioButton1.Checked)
             {
                 _printer.ConnType = 1;
+                InvalidatePrinterFontChoices();
                 RequestPrinterStatusRefresh();
             }
         }
@@ -558,6 +1062,7 @@ namespace GodexIndustrial
             if (radioButton2.Checked)
             {
                 _printer.ConnType = 2;
+                InvalidatePrinterFontChoices();
                 RequestPrinterStatusRefresh();
             }
         }
@@ -567,6 +1072,7 @@ namespace GodexIndustrial
             if (radioButton3.Checked)
             {
                 _printer.ConnType = 3;
+                InvalidatePrinterFontChoices();
                 RequestPrinterStatusRefresh();
             }
         }
@@ -574,12 +1080,14 @@ namespace GodexIndustrial
         private void cmbSerialPorts_SelectedIndexChanged(object sender, EventArgs e)
         {
             _printer.ComPortName = cmbSerialPorts.SelectedItem as string;
+            InvalidatePrinterFontChoices();
             RequestPrinterStatusRefresh();
         }
 
         private void cmbBaudRate_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (int.TryParse(cmbBaudRate.SelectedItem as string, out int baud)) _printer.BaudRate = baud;
+            InvalidatePrinterFontChoices();
             RequestPrinterStatusRefresh();
         }
 
@@ -597,6 +1105,7 @@ namespace GodexIndustrial
         private void cmbPrinters_SelectedIndexChanged(object sender, EventArgs e)
         {
             _printer.PrinterName = cmbPrinters.SelectedItem as string;
+            InvalidatePrinterFontChoices();
             RequestPrinterStatusRefresh();
         }
 
@@ -629,18 +1138,13 @@ namespace GodexIndustrial
                 else
                     cmbPrintSpeedTemplate.SelectedIndex = 2; // Default 101.6 mm/s
 
-                UpdateXOffsetFields(t);
+                PopulateXOffsetPanel(t.ColumnCount, t.XOffsets);
                 UpdateDataGridViewColumns(t.ColumnCount);
             }
             finally
             {
                 _isUpdatingUI = false;
             }
-        }
-
-        private void UpdateXOffsetFields(LabelTemplate t)
-        {
-            PopulateXOffsetPanel(t.ColumnCount, t.XOffsets);
         }
 
         private void PopulateXOffsetPanel(int count, List<int> xOffsets)

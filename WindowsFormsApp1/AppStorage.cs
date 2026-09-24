@@ -5,8 +5,7 @@ namespace GodexIndustrial
 {
     internal static class AppStorage
     {
-        public static readonly string DirectoryPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GodexIndustrial");
+        public static readonly string DirectoryPath = AppDomain.CurrentDomain.BaseDirectory;
 
         public static string EnsureDirectory(string name)
         {

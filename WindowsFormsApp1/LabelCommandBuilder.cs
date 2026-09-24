@@ -6,9 +6,13 @@ namespace GodexIndustrial
 {
     internal static class LabelCommandBuilder
     {
-        public static string Build(LabelTemplate template, IEnumerable<string[]> rows)
+        public static string Build(LabelTemplate template, IEnumerable<string[]> rows,
+            PrinterFontInfo printerFont = null)
         {
             TemplateManager.ValidateTemplate(template);
+            char fontSlot = 'A';
+            if (printerFont != null && !printerFont.TryGetPrintSlot(out fontSlot))
+                throw new ArgumentException("The selected printer font has no printable ID.", nameof(printerFont));
             var sb = new StringBuilder();
             sb.AppendLine($"^Q{template.LabelLength},{template.LabelGap}");
             sb.AppendLine($"^W{template.LabelWidth}");
@@ -36,7 +40,10 @@ namespace GodexIndustrial
                     if (value.IndexOfAny(new[] { '\0', '^', '~' }) >= 0)
                         throw new ArgumentException($"Label {labelCount + 1}, column {i + 1} contains a printer control character.");
                     int x = template.XOffsets[i];
-                    sb.AppendLine($"ATA,{x},{template.YOffset},{template.FontSize},{template.FontSize},0,{template.Rotation}BE,A,0,{value}");
+                    if (printerFont != null && printerFont.Type == "FNT")
+                        sb.AppendLine($"V{fontSlot},{x},{template.YOffset},1,1,0,{template.Rotation},{value}");
+                    else
+                        sb.AppendLine($"AT{fontSlot},{x},{template.YOffset},{template.FontSize},{template.FontSize},0,{template.Rotation}BE,A,0,{value}");
                 }
                 sb.AppendLine("E");
                 labelCount++;

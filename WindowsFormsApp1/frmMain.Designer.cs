@@ -43,6 +43,7 @@ namespace GodexIndustrial
             this.panelMenu = new System.Windows.Forms.Panel();
             this.iconBLog = new FontAwesome.Sharp.IconButton();
             this.iconAbout = new FontAwesome.Sharp.IconButton();
+            this.iconFonts = new FontAwesome.Sharp.IconButton();
             this.iconConnection = new FontAwesome.Sharp.IconButton();
             this.iconPrintData = new FontAwesome.Sharp.IconButton();
             this.iconLabel = new FontAwesome.Sharp.IconButton();
@@ -59,6 +60,10 @@ namespace GodexIndustrial
             this.tabPage1 = new System.Windows.Forms.TabPage();
             this.tableLayoutPanel1 = new System.Windows.Forms.TableLayoutPanel();
             this.panel1 = new System.Windows.Forms.Panel();
+            this.lblPrinterFont = new System.Windows.Forms.Label();
+            this.cmbPrinterFont = new System.Windows.Forms.ComboBox();
+            this.btnRefreshPrinterFonts = new System.Windows.Forms.Button();
+            this.lblPrinterFontHint = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
             this.cmbRotation = new System.Windows.Forms.ComboBox();
             this.label18 = new System.Windows.Forms.Label();
@@ -107,6 +112,7 @@ namespace GodexIndustrial
             this.tabPage4 = new System.Windows.Forms.TabPage();
             this.tbLog = new System.Windows.Forms.TextBox();
             this.tabPage5 = new System.Windows.Forms.TabPage();
+            this.tabFonts = new System.Windows.Forms.TabPage();
             this.textBox1 = new System.Windows.Forms.TextBox();
             this.panelMenu.SuspendLayout();
             this.panelLogo.SuspendLayout();
@@ -277,6 +283,7 @@ namespace GodexIndustrial
             this.panelMenu.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(31)))), ((int)(((byte)(30)))), ((int)(((byte)(68)))));
             this.panelMenu.Controls.Add(this.iconBLog);
             this.panelMenu.Controls.Add(this.iconAbout);
+            this.panelMenu.Controls.Add(this.iconFonts);
             this.panelMenu.Controls.Add(this.iconConnection);
             this.panelMenu.Controls.Add(this.iconPrintData);
             this.panelMenu.Controls.Add(this.iconLabel);
@@ -332,7 +339,30 @@ namespace GodexIndustrial
             this.iconAbout.TextImageRelation = System.Windows.Forms.TextImageRelation.ImageBeforeText;
             this.iconAbout.UseVisualStyleBackColor = true;
             this.iconAbout.Click += new System.EventHandler(this.iconButton5_Click);
-            // 
+            //
+            // iconFonts
+            //
+            this.iconFonts.Dock = System.Windows.Forms.DockStyle.Top;
+            this.iconFonts.FlatAppearance.BorderSize = 0;
+            this.iconFonts.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.iconFonts.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(204)));
+            this.iconFonts.ForeColor = System.Drawing.SystemColors.ButtonHighlight;
+            this.iconFonts.IconChar = FontAwesome.Sharp.IconChar.Font;
+            this.iconFonts.IconColor = System.Drawing.Color.Gainsboro;
+            this.iconFonts.IconFont = FontAwesome.Sharp.IconFont.Auto;
+            this.iconFonts.IconSize = 32;
+            this.iconFonts.ImageAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.iconFonts.Location = new System.Drawing.Point(0, 230);
+            this.iconFonts.Name = "iconFonts";
+            this.iconFonts.Padding = new System.Windows.Forms.Padding(10, 0, 20, 0);
+            this.iconFonts.Size = new System.Drawing.Size(220, 60);
+            this.iconFonts.TabIndex = 4;
+            this.iconFonts.Text = "Fonts";
+            this.iconFonts.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.iconFonts.TextImageRelation = System.Windows.Forms.TextImageRelation.ImageBeforeText;
+            this.iconFonts.UseVisualStyleBackColor = true;
+            this.iconFonts.Click += new System.EventHandler(this.iconFonts_Click);
+            //
             // iconConnection
             // 
             this.iconConnection.Dock = System.Windows.Forms.DockStyle.Top;
@@ -541,6 +571,7 @@ namespace GodexIndustrial
             this.tabControl1.Controls.Add(this.tabPage2);
             this.tabControl1.Controls.Add(this.tabPage4);
             this.tabControl1.Controls.Add(this.tabPage5);
+            this.tabControl1.Controls.Add(this.tabFonts);
             this.tabControl1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tabControl1.ItemSize = new System.Drawing.Size(0, 1);
             this.tabControl1.Location = new System.Drawing.Point(220, 50);
@@ -560,7 +591,7 @@ namespace GodexIndustrial
             this.tabPage1.Size = new System.Drawing.Size(643, 492);
             this.tabPage1.TabIndex = 0;
             this.tabPage1.Text = "Printing Settings";
-            this.tabPage1.UseVisualStyleBackColor = true;
+            this.tabPage1.BackColor = System.Drawing.Color.White;
             // 
             // tableLayoutPanel1
             // 
@@ -603,6 +634,50 @@ namespace GodexIndustrial
             this.panel1.Size = new System.Drawing.Size(312, 415);
             this.panel1.TabIndex = 0;
             // 
+            // lblPrinterFont
+            //
+            this.lblPrinterFont.AutoSize = true;
+            this.lblPrinterFont.Font = new System.Drawing.Font("Segoe UI", 12F);
+            this.lblPrinterFont.Location = new System.Drawing.Point(16, 61);
+            this.lblPrinterFont.Name = "lblPrinterFont";
+            this.lblPrinterFont.Size = new System.Drawing.Size(94, 21);
+            this.lblPrinterFont.TabIndex = 13;
+            this.lblPrinterFont.Text = "Printer font";
+            //
+            // cmbPrinterFont
+            //
+            this.cmbPrinterFont.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbPrinterFont.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.cmbPrinterFont.FormattingEnabled = true;
+            this.cmbPrinterFont.Items.AddRange(new object[] { "A (без перевірки)" });
+            this.cmbPrinterFont.SelectedIndex = 0;
+            this.cmbPrinterFont.Location = new System.Drawing.Point(116, 58);
+            this.cmbPrinterFont.Name = "cmbPrinterFont";
+            this.cmbPrinterFont.Size = new System.Drawing.Size(260, 25);
+            this.cmbPrinterFont.DropDownWidth = 320;
+            this.cmbPrinterFont.TabIndex = 14;
+            //
+            // btnRefreshPrinterFonts
+            //
+            this.btnRefreshPrinterFonts.Font = new System.Drawing.Font("Segoe UI", 12F);
+            this.btnRefreshPrinterFonts.Location = new System.Drawing.Point(384, 56);
+            this.btnRefreshPrinterFonts.Name = "btnRefreshPrinterFonts";
+            this.btnRefreshPrinterFonts.Size = new System.Drawing.Size(34, 28);
+            this.btnRefreshPrinterFonts.TabIndex = 15;
+            this.btnRefreshPrinterFonts.Text = "↻";
+            this.btnRefreshPrinterFonts.UseVisualStyleBackColor = true;
+            //
+            // lblPrinterFontHint
+            //
+            this.lblPrinterFontHint.Font = new System.Drawing.Font("Segoe UI", 8F);
+            this.lblPrinterFontHint.ForeColor = System.Drawing.Color.DimGray;
+            this.lblPrinterFontHint.Location = new System.Drawing.Point(116, 87);
+            this.lblPrinterFontHint.Name = "lblPrinterFontHint";
+            this.lblPrinterFontHint.Size = new System.Drawing.Size(480, 25);
+            this.lblPrinterFontHint.AutoEllipsis = true;
+            this.lblPrinterFontHint.TabIndex = 16;
+            this.lblPrinterFontHint.Text = "Натисніть ↻, щоб прочитати шрифти принтера.";
+            //
             // label3
             // 
             this.label3.AutoSize = true;
@@ -938,7 +1013,7 @@ namespace GodexIndustrial
             this.tabPage3.Size = new System.Drawing.Size(643, 492);
             this.tabPage3.TabIndex = 2;
             this.tabPage3.Text = "Settings";
-            this.tabPage3.UseVisualStyleBackColor = true;
+            this.tabPage3.BackColor = System.Drawing.Color.White;
             // 
             // groupBox5
             // 
@@ -1120,24 +1195,29 @@ namespace GodexIndustrial
             this.tabPage2.Size = new System.Drawing.Size(643, 492);
             this.tabPage2.TabIndex = 3;
             this.tabPage2.Text = "tabPage2";
-            this.tabPage2.UseVisualStyleBackColor = true;
+            this.tabPage2.BackColor = System.Drawing.Color.White;
             // 
             // myDataGridView
             // 
             this.myDataGridView.AllowUserToAddRows = false;
+            this.myDataGridView.BackgroundColor = System.Drawing.Color.White;
             this.myDataGridView.BorderStyle = System.Windows.Forms.BorderStyle.Fixed3D;
             this.myDataGridView.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.myDataGridView.Cursor = System.Windows.Forms.Cursors.Arrow;
             this.myDataGridView.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.myDataGridView.Location = new System.Drawing.Point(3, 55);
+            this.myDataGridView.Location = new System.Drawing.Point(3, 119);
             this.myDataGridView.Name = "myDataGridView";
             this.myDataGridView.RowHeadersVisible = false;
             this.myDataGridView.RowHeadersWidthSizeMode = System.Windows.Forms.DataGridViewRowHeadersWidthSizeMode.AutoSizeToDisplayedHeaders;
-            this.myDataGridView.Size = new System.Drawing.Size(637, 434);
+            this.myDataGridView.Size = new System.Drawing.Size(637, 370);
             this.myDataGridView.TabIndex = 47;
             // 
             // panelPrint
             // 
+            this.panelPrint.Controls.Add(this.lblPrinterFont);
+            this.panelPrint.Controls.Add(this.cmbPrinterFont);
+            this.panelPrint.Controls.Add(this.btnRefreshPrinterFonts);
+            this.panelPrint.Controls.Add(this.lblPrinterFontHint);
             this.panelPrint.Controls.Add(this.iconAddSeries);
             this.panelPrint.Controls.Add(this.iconButton3);
             this.panelPrint.Controls.Add(this.iconCalibtate);
@@ -1147,7 +1227,7 @@ namespace GodexIndustrial
             this.panelPrint.Location = new System.Drawing.Point(3, 3);
             this.panelPrint.Name = "panelPrint";
             this.panelPrint.Padding = new System.Windows.Forms.Padding(0, 0, 3, 5);
-            this.panelPrint.Size = new System.Drawing.Size(637, 52);
+            this.panelPrint.Size = new System.Drawing.Size(637, 116);
             this.panelPrint.TabIndex = 48;
             // 
             // tabPage4
@@ -1159,7 +1239,7 @@ namespace GodexIndustrial
             this.tabPage4.Size = new System.Drawing.Size(643, 492);
             this.tabPage4.TabIndex = 4;
             this.tabPage4.Text = "tabPage4";
-            this.tabPage4.UseVisualStyleBackColor = true;
+            this.tabPage4.BackColor = System.Drawing.Color.White;
             // 
             // tbLog
             // 
@@ -1180,7 +1260,7 @@ namespace GodexIndustrial
             this.tabPage5.Size = new System.Drawing.Size(643, 492);
             this.tabPage5.TabIndex = 5;
             this.tabPage5.Text = "tabPage5";
-            this.tabPage5.UseVisualStyleBackColor = true;
+            this.tabPage5.BackColor = System.Drawing.Color.White;
             // 
             // textBox1
             // 
@@ -1192,7 +1272,17 @@ namespace GodexIndustrial
             this.textBox1.Size = new System.Drawing.Size(637, 486);
             this.textBox1.TabIndex = 0;
             this.textBox1.Text = resources.GetString("textBox1.Text");
-            // 
+            //
+            // tabFonts
+            //
+            this.tabFonts.BackColor = System.Drawing.Color.White;
+            this.tabFonts.Location = new System.Drawing.Point(4, 5);
+            this.tabFonts.Name = "tabFonts";
+            this.tabFonts.Padding = new System.Windows.Forms.Padding(3);
+            this.tabFonts.Size = new System.Drawing.Size(643, 492);
+            this.tabFonts.TabIndex = 6;
+            this.tabFonts.Text = "Fonts";
+            //
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
@@ -1252,6 +1342,7 @@ namespace GodexIndustrial
         private System.Windows.Forms.Panel panelLogo;
         private FontAwesome.Sharp.IconButton iconLabel;
         private FontAwesome.Sharp.IconButton iconAbout;
+        private FontAwesome.Sharp.IconButton iconFonts;
         private FontAwesome.Sharp.IconButton iconBLog;
         private FontAwesome.Sharp.IconButton iconConnection;
         private FontAwesome.Sharp.IconButton iconPrintData;
@@ -1306,6 +1397,7 @@ namespace GodexIndustrial
         private FontAwesome.Sharp.IconButton btnMaximize;
         private FontAwesome.Sharp.IconButton btnClose;
         private System.Windows.Forms.TabPage tabPage5;
+        private System.Windows.Forms.TabPage tabFonts;
         private System.Windows.Forms.TextBox textBox1;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label lblPrinterStatus;
@@ -1320,6 +1412,10 @@ namespace GodexIndustrial
         private FontAwesome.Sharp.IconButton iconRename;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel1;
         private System.Windows.Forms.Panel panel1;
+        private System.Windows.Forms.Label lblPrinterFont;
+        private System.Windows.Forms.ComboBox cmbPrinterFont;
+        private System.Windows.Forms.Button btnRefreshPrinterFonts;
+        private System.Windows.Forms.Label lblPrinterFontHint;
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.Panel panel2;
         private System.Windows.Forms.Label label7;

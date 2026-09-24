@@ -48,7 +48,6 @@ namespace GodexIndustrial
 
         public static List<LabelTemplate> GetAllTemplates(Action<string> warning = null)
         {
-            MigrateLegacyTemplates(warning);
             var templates = new List<LabelTemplate>();
             foreach (string file in Directory.GetFiles(TemplatesDirectory, "*.json"))
             {
@@ -66,23 +65,6 @@ namespace GodexIndustrial
                 }
             }
             return templates.OrderBy(t => t.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-        }
-
-        private static void MigrateLegacyTemplates(Action<string> warning)
-        {
-            string marker = Path.Combine(TemplatesDirectory, ".migration-complete");
-            if (File.Exists(marker)) return;
-            string legacy = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Templates");
-            if (!Directory.Exists(legacy) || string.Equals(legacy, TemplatesDirectory, StringComparison.OrdinalIgnoreCase)) return;
-            bool success = true;
-            foreach (string source in Directory.GetFiles(legacy, "*.json"))
-            {
-                string target = Path.Combine(TemplatesDirectory, Path.GetFileName(source));
-                if (File.Exists(target)) continue;
-                try { File.Copy(source, target); }
-                catch (Exception ex) { success = false; warning?.Invoke($"Cannot migrate {Path.GetFileName(source)}: {ex.Message}"); }
-            }
-            if (success) File.WriteAllText(marker, DateTime.UtcNow.ToString("O"));
         }
 
         public static void RenameTemplate(LabelTemplate template, string newName)

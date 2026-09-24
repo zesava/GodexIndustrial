@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using GodexIndustrial;
 
 namespace GodexIndustrial.Tests
@@ -31,6 +32,91 @@ namespace GodexIndustrial.Tests
             };
         }
 
+        private static void VerifyFontUpload(System.Reflection.Assembly application,
+            byte[] payload, string expectedHeader, string expectedName)
+        {
+            var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            listener.Start();
+            try
+            {
+                var received = System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (var client = listener.AcceptTcpClient())
+                    using (var stream = client.GetStream())
+                    using (var memory = new MemoryStream())
+                    {
+                        stream.ReadTimeout = 5000;
+                        stream.CopyTo(memory);
+                        return memory.ToArray();
+                    }
+                });
+                Type printerType = application.GetType("GodexIndustrial.LabelPrinter");
+                object printer = Activator.CreateInstance(printerType);
+                printerType.GetProperty("IpAddr").SetValue(printer, "127.0.0.1");
+                printerType.GetProperty("Port").SetValue(printer,
+                    ((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
+                var upload = System.Threading.Tasks.Task.Run(() =>
+                    ((System.Threading.Tasks.Task<string>)printerType
+                        .GetMethod("UploadFontAsync", new[]
+                        {
+                            typeof(byte[]), typeof(string), typeof(char), typeof(IProgress<int>)
+                        })
+                        .Invoke(printer, new object[] { payload, "Test Font", 'B', null }))
+                        .GetAwaiter().GetResult());
+                Check(upload.GetAwaiter().GetResult() == expectedName,
+                    "Windows font upload reports its printer font slot");
+                byte[] command = System.Text.Encoding.ASCII.GetBytes(expectedHeader);
+                byte[] expected = command.Concat(payload).ToArray();
+                Check(received.GetAwaiter().GetResult().SequenceEqual(expected),
+                    "Windows font upload sends the exact header and unmodified binary bytes");
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
+
+        private static void VerifyFontDeletion(System.Reflection.Assembly application,
+            string type, string name, string expectedCommand)
+        {
+            var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            listener.Start();
+            try
+            {
+                var received = System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (var client = listener.AcceptTcpClient())
+                    using (var stream = client.GetStream())
+                    using (var memory = new MemoryStream())
+                    {
+                        stream.ReadTimeout = 5000;
+                        stream.CopyTo(memory);
+                        return memory.ToArray();
+                    }
+                });
+                Type printerType = application.GetType("GodexIndustrial.LabelPrinter");
+                Type fontType = application.GetType("GodexIndustrial.PrinterFontInfo");
+                object font = Activator.CreateInstance(fontType, type, name, "");
+                object printer = Activator.CreateInstance(printerType);
+                printerType.GetProperty("IpAddr").SetValue(printer, "127.0.0.1");
+                printerType.GetProperty("Port").SetValue(printer,
+                    ((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
+                var deletion = System.Threading.Tasks.Task.Run(() =>
+                    ((System.Threading.Tasks.Task)printerType.GetMethod("DeleteFontAsync")
+                        .Invoke(printer, new[] { font })).GetAwaiter().GetResult());
+                Check(deletion.Wait(TimeSpan.FromSeconds(10)),
+                    type + " deletion completes without waiting on the UI thread");
+                Check(received.Wait(TimeSpan.FromSeconds(10)),
+                    type + " deletion reaches the TCP printer");
+                Check(received.GetAwaiter().GetResult().SequenceEqual(
+                    System.Text.Encoding.ASCII.GetBytes(expectedCommand + Environment.NewLine)),
+                    type + " deletion sends only the selected font command");
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
         [STAThread]
         private static void Main()
         {
@@ -76,6 +162,24 @@ namespace GodexIndustrial.Tests
                     .Deserialize<LabelTemplate>(json).Rotation == rotation,
                     $"Rotation {rotation} survives template serialization");
             }
+            template.Rotation = 0;
+            var selectedTtf = new PrinterFontInfo("TTF", "B: Arial", "");
+            string ttfCommands = LabelCommandBuilder.Build(template,
+                new[] { new[] { "X", "Y" } }, selectedTtf);
+            Check(ttfCommands.Contains("ATB,20,10,27,27,0,0BE,A,0,X") &&
+                ttfCommands.Contains("ATB,120,10,27,27,0,0BE,A,0,Y"),
+                "Selected TTF slot is used for each print field");
+            template.Rotation = 2;
+            string fntCommands = LabelCommandBuilder.Build(template,
+                new[] { new[] { "X", "Y" } },
+                new PrinterFontInfo("FNT", "A.FNT", ""));
+            Check(fntCommands.Contains("VA,20,10,1,1,0,2,X") &&
+                fntCommands.Contains("VA,120,10,1,1,0,2,Y"),
+                "Selected FNT uses bitmap command with rotation");
+            Throws<ArgumentException>(() => LabelCommandBuilder.Build(template,
+                new[] { new[] { "X", "Y" } },
+                new PrinterFontInfo("TTF", "No printer ID", "")));
+            template.Rotation = 0;
             var zero = LabelRotation.RotatedBounds(10, 20, 30, 5, 0);
             var ninety = LabelRotation.RotatedBounds(10, 20, 30, 5, 1);
             var oneEighty = LabelRotation.RotatedBounds(10, 20, 30, 5, 2);
@@ -122,6 +226,9 @@ namespace GodexIndustrial.Tests
                 if (File.Exists(path)) File.Delete(path);
                 Directory.Delete(directory);
             }
+            Check(AppStorage.DirectoryPath == AppDomain.CurrentDomain.BaseDirectory,
+                "Settings, templates and logs are rooted beside the executable");
+
             using (var printers = new System.Windows.Forms.ComboBox())
             {
                 printers.Items.Add("Printer A");
@@ -146,6 +253,70 @@ namespace GodexIndustrial.Tests
                 return File.Exists(dependency) ? System.Reflection.Assembly.LoadFrom(dependency) : null;
             };
             var application = System.Reflection.Assembly.LoadFrom(Path.Combine(appDirectory, "GodexIndustrial.exe"));
+            using (var selectedFont = new System.Drawing.Font(
+                System.Drawing.FontFamily.GenericSansSerif, 12F))
+            {
+                Type fontReader = application.GetType("GodexIndustrial.InstalledFontData");
+                byte[] installedBytes = (byte[])fontReader
+                    .GetMethod("ReadTrueType",
+                        System.Reflection.BindingFlags.Static |
+                        System.Reflection.BindingFlags.NonPublic)
+                    .Invoke(null, new object[] { selectedFont });
+                Check(installedBytes.Length > 12 &&
+                    installedBytes[0] == 0 && installedBytes[1] == 1 &&
+                    installedBytes[2] == 0 && installedBytes[3] == 0,
+                    "Selected Windows font exposes TrueType bytes");
+            }
+            var parsedFonts = PrinterFontCatalog.ParseDirectory(
+                "FLASH MEMORY\r\nLabel1 LBL\r\nA FNT\r\n" +
+                "A: CP850_Latin1 TTF_TABLE\r\nA: Arial (True Type) TTF\r\n" +
+                "559104 byte(s) free\r\n");
+            Check(parsedFonts.Fonts.Count == 2 &&
+                parsedFonts.Fonts[0].Type == "FNT" && parsedFonts.Fonts[0].Name == "A.FNT" &&
+                parsedFonts.Fonts[1].Type == "TTF" && parsedFonts.Fonts[1].Name == "A: Arial",
+                "~MDIR catalog parses FNT and TTF, excluding the TTF table");
+            Check(parsedFonts.FreeMemoryKb == "546" &&
+                parsedFonts.Fonts[0].Size == string.Empty &&
+                parsedFonts.Fonts[1].Size == string.Empty,
+                "Directory reports free flash memory and does not invent font sizes");
+            Check(parsedFonts.FindAvailableSlot("TTF") == 'B' &&
+                parsedFonts.FindAvailableSlot("FNT") == 'B',
+                "Font upload chooses a free slot for each font type");
+            Check(new PrinterFontInfo("TTF", "B: Arial", "")
+                    .TryBuildDeleteCommand(out string ttfDelete) &&
+                ttfDelete == "~MDELC,B",
+                "TTF deletion uses the printer font ID");
+            Check(new PrinterFontInfo("FNT", "A.FNT", "")
+                    .TryBuildDeleteCommand(out string fntDelete) &&
+                fntDelete == "~MDELE,A",
+                "Bitmap font deletion uses its one-letter name");
+            Check(!new PrinterFontInfo("TTF", "Arial", "")
+                    .TryBuildDeleteCommand(out _) &&
+                !new PrinterFontInfo("FNT", "*.FNT", "")
+                    .TryBuildDeleteCommand(out _),
+                "Ambiguous font rows cannot form delete commands");
+            Type deletePrinterType = application.GetType("GodexIndustrial.LabelPrinter");
+            Type deleteFontType = application.GetType("GodexIndustrial.PrinterFontInfo");
+            object usbPrinter = Activator.CreateInstance(deletePrinterType);
+            deletePrinterType.GetProperty("ConnType").SetValue(usbPrinter, 3);
+            deletePrinterType.GetProperty("PrinterName").SetValue(usbPrinter, "Test queue");
+            object usbFont = Activator.CreateInstance(deleteFontType, "TTF", "B: Arial", "");
+            Throws<NotSupportedException>(() =>
+                System.Threading.Tasks.Task.Run(() =>
+                    ((System.Threading.Tasks.Task)deletePrinterType.GetMethod("DeleteFontAsync")
+                        .Invoke(usbPrinter, new[] { usbFont })).GetAwaiter().GetResult())
+                    .GetAwaiter().GetResult());
+            VerifyFontDeletion(application, "TTF", "B: Arial", "~MDELC,B");
+            VerifyFontDeletion(application, "FNT", "A.FNT", "~MDELE,A");
+            VerifyFontUpload(application,
+                new byte[] { 0, 1, 0, 0, 0, 1, 0xFF, 0, 0x1B, 0, 0, 0 },
+                "~H,TTF,BTestFont,12\r", "B: TestFont");
+            string fullDirectory = "FLASH MEMORY\r\n" +
+                string.Concat(Enumerable.Range(0, 26)
+                    .Select(index => ((char)('A' + index)) + ": Font" + index + " TTF\r\n"));
+            Throws<InvalidOperationException>(() =>
+                PrinterFontCatalog.ParseDirectory(fullDirectory).FindAvailableSlot("TTF"));
+
             var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
             listener.Start();
             try
@@ -190,21 +361,207 @@ namespace GodexIndustrial.Tests
             {
                 listener.Stop();
             }
+            var fontListener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            fontListener.Start();
+            try
+            {
+                var fontCommand = System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (var client = fontListener.AcceptTcpClient())
+                    using (var stream = client.GetStream())
+                    {
+                        var bytes = new List<byte>();
+                        while (bytes.Count < 32)
+                        {
+                            int value = stream.ReadByte();
+                            if (value < 0) throw new IOException("Directory query ended early.");
+                            bytes.Add((byte)value);
+                            if (value == '\n') break;
+                        }
+                        byte[] response = System.Text.Encoding.ASCII.GetBytes(
+                            "FLASH MEMORY\r\nA FNT\r\nA: Arial (True Type) TTF\r\n" +
+                            "559104 byte(s) free\r\n");
+                        stream.Write(response, 0, response.Length);
+                        return System.Text.Encoding.ASCII.GetString(bytes.ToArray());
+                    }
+                });
+                Type printerType = application.GetType("GodexIndustrial.LabelPrinter");
+                object fontPrinter = Activator.CreateInstance(printerType);
+                printerType.GetProperty("IpAddr").SetValue(fontPrinter, "127.0.0.1");
+                printerType.GetProperty("Port").SetValue(fontPrinter,
+                    ((System.Net.IPEndPoint)fontListener.LocalEndpoint).Port);
+                var fontQuery = System.Threading.Tasks.Task.Run(() =>
+                {
+                    var task = (System.Threading.Tasks.Task)printerType
+                        .GetMethod("QueryPrinterFontsAsync").Invoke(fontPrinter, null);
+                    task.GetAwaiter().GetResult();
+                    return task.GetType().GetProperty("Result").GetValue(task);
+                });
+                object catalog = fontQuery.GetAwaiter().GetResult();
+                var fontRows = (System.Collections.ICollection)catalog.GetType()
+                    .GetProperty("Fonts").GetValue(catalog);
+                Check(fontRows.Count == 2, "LAN directory query returns printer fonts");
+                Check(fontCommand.GetAwaiter().GetResult() == "~MDIR" + Environment.NewLine,
+                    "Font query sends only the memory directory command");
+            }
+            finally
+            {
+                fontListener.Stop();
+            }
             using (var form = (IDisposable)Activator.CreateInstance(application.GetType("GodexIndustrial.Form1")))
             {
                 Check(form != null, "Main form opens without a saved printer");
                 var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                var sidebar = (System.Windows.Forms.Panel)form.GetType()
+                    .GetField("panelMenu", flags).GetValue(form);
+                sidebar.PerformLayout();
+                var fontsButton = (System.Windows.Forms.Control)form.GetType()
+                    .GetField("iconFonts", flags).GetValue(form);
+                var connectionButton = (System.Windows.Forms.Control)form.GetType()
+                    .GetField("iconConnection", flags).GetValue(form);
+                Check(fontsButton.Top == connectionButton.Bottom,
+                    "Fonts button is directly below Printer connection");
+                var fontsList = (System.Windows.Forms.ListView)form.GetType()
+                    .GetField("_fontsList", flags).GetValue(form);
+                Check(fontsList.Columns.Count == 3 && fontsList.Groups.Count == 2 &&
+                    fontsList.Groups["FNT"] != null && fontsList.Groups["TTF"] != null,
+                    "Fonts tab has type, file name, size and FNT/TTF groups");
+                var fontsTab = (System.Windows.Forms.TabPage)form.GetType()
+                    .GetField("tabFonts", flags).GetValue(form);
+                var fontsLayout = (System.Windows.Forms.TableLayoutPanel)fontsTab.Controls[0];
+                fontsLayout.PerformLayout();
+                var fontsHeader = (System.Windows.Forms.TableLayoutPanel)
+                    fontsLayout.GetControlFromPosition(0, 0);
+                fontsHeader.PerformLayout();
+                var refreshFontsButton = (System.Windows.Forms.Button)form.GetType()
+                    .GetField("_refreshFontsButton", flags).GetValue(form);
+                var uploadFontButton = (System.Windows.Forms.Button)form.GetType()
+                    .GetField("_uploadFontButton", flags).GetValue(form);
+                var deleteFontButton = (System.Windows.Forms.Button)form.GetType()
+                    .GetField("_deleteFontButton", flags).GetValue(form);
+                var fontStatus = (System.Windows.Forms.Label)form.GetType()
+                    .GetField("_fontsStatus", flags).GetValue(form);
+                string prompt = fontStatus.Text;
+
+                // Showing the form creates the native TabControl handle. An inserted
+                // page used to disappear at this point, leaving the entire tab blank.
+                object savedSettings = form.GetType().GetField("_settings", flags).GetValue(form);
+                savedSettings.GetType().GetProperty("ConnectionType").SetValue(savedSettings, 3);
+                var window = (System.Windows.Forms.Form)form;
+                window.ShowInTaskbar = false;
+                window.Opacity = 0;
+                window.Show();
+                System.Windows.Forms.Application.DoEvents();
+                form.GetType().GetMethod("iconFonts_Click", flags)
+                    .Invoke(form, new object[] { fontsButton, EventArgs.Empty });
+                System.Windows.Forms.Application.DoEvents();
+
+                var fontsTabControl = (System.Windows.Forms.TabControl)fontsTab.Parent;
+                Check(fontsTabControl.TabPages.Cast<System.Windows.Forms.TabPage>()
+                    .All(page => page.BackColor == System.Drawing.Color.White) &&
+                    ((System.Windows.Forms.DataGridView)form.GetType()
+                        .GetField("myDataGridView", flags).GetValue(form))
+                        .BackgroundColor == System.Drawing.Color.White,
+                    "All page backgrounds and the print-data grid are white");
+                Check(new[] { "panelTemplate", "tableLayoutPanel1", "panel1", "panel2",
+                        "panelPrint", "groupBox1", "groupBox2", "groupBox3", "groupBox5" }
+                    .All(name => ((System.Windows.Forms.Control)form.GetType()
+                        .GetField(name, flags).GetValue(form)).BackColor ==
+                        System.Drawing.Color.White),
+                    "Child content panels inherit the white page background");
+                Check(fontsTabControl.TabPages.Contains(fontsTab) &&
+                    fontsTabControl.SelectedTab == fontsTab &&
+                    fontsTab.Visible && fontsLayout.Visible &&
+                    fontsHeader.Visible && refreshFontsButton.Visible &&
+                    uploadFontButton.Visible && deleteFontButton.Visible &&
+                    fontsList.Visible && fontStatus.Visible,
+                    "Fonts tab and its controls remain visible after the form opens");
+                Check(refreshFontsButton.Text == "Оновити" &&
+                    uploadFontButton.Text == "Завантажити" &&
+                    deleteFontButton.Text == "Видалити" && !deleteFontButton.Enabled &&
+                    refreshFontsButton.Parent == fontsHeader &&
+                    uploadFontButton.Parent == fontsHeader &&
+                    deleteFontButton.Parent == fontsHeader &&
+                    fontsList.Top >= fontsHeader.Bottom &&
+                    refreshFontsButton.Right <= fontsHeader.ClientSize.Width &&
+                    fontsLayout.Width > 200 && fontsList.Height > 100,
+                    "Refresh button is visible above the font list");
+                Check(fontStatus.Text == prompt &&
+                    !(bool)form.GetType().GetField("_fontsLoading", flags).GetValue(form),
+                    "Opening Fonts does not send a printer query");
+                Type appCatalog = application.GetType("GodexIndustrial.PrinterFontCatalog");
+                object uiCatalog = appCatalog.GetMethod("ParseDirectory").Invoke(null,
+                    new object[] { "FLASH MEMORY\r\nA FNT\r\nB: Arial TTF\r\n" });
+                form.GetType().GetMethod("ShowFontCatalog", flags)
+                    .Invoke(form, new[] { uiCatalog });
+                var printFontList = (System.Windows.Forms.ComboBox)form.GetType()
+                    .GetField("cmbPrinterFont", flags).GetValue(form);
+                Check(printFontList.Items.Count == 2 &&
+                    printFontList.SelectedItem.ToString() == "TTF — B: Arial",
+                    "Label font list shows printer catalog and selects TTF by default");
+                var printTab = (System.Windows.Forms.TabPage)form.GetType()
+                    .GetField("tabPage2", flags).GetValue(form);
+                var printPanel = (System.Windows.Forms.Panel)form.GetType()
+                    .GetField("panelPrint", flags).GetValue(form);
+                var printGrid = (System.Windows.Forms.DataGridView)form.GetType()
+                    .GetField("myDataGridView", flags).GetValue(form);
+                var fontRefresh = (System.Windows.Forms.Control)form.GetType()
+                    .GetField("btnRefreshPrinterFonts", flags).GetValue(form);
+                var fontHint = (System.Windows.Forms.Control)form.GetType()
+                    .GetField("lblPrinterFontHint", flags).GetValue(form);
+                Check(printFontList.Parent == printPanel &&
+                    fontRefresh.Parent == printPanel && fontHint.Parent == printPanel,
+                    "Printer font controls are in Print data, not Label");
+                fontsTabControl.SelectedTab = printTab;
+                System.Windows.Forms.Application.DoEvents();
+                Check(printPanel.Visible && printFontList.Visible &&
+                    fontRefresh.Visible && fontHint.Visible &&
+                    printGrid.Top >= printPanel.Bottom && printGrid.Height > 100,
+                    "Printer font controls and data grid fit in Print data");
+                fontsTabControl.SelectedTab = fontsTab;
+                System.Windows.Forms.Application.DoEvents();
+                printFontList.SelectedIndex = 0;
+                form.GetType().GetMethod("ShowFontCatalog", flags)
+                    .Invoke(form, new[] { uiCatalog });
+                Check(printFontList.SelectedItem.ToString() == "FNT — A.FNT",
+                    "Refreshing the catalog preserves the selected font");
+                object withoutSelectedFont = appCatalog.GetMethod("ParseDirectory").Invoke(null,
+                    new object[] { "FLASH MEMORY\r\nB: Arial TTF\r\n" });
+                form.GetType().GetMethod("ShowFontCatalog", flags)
+                    .Invoke(form, new[] { withoutSelectedFont });
+                Check(printFontList.SelectedIndex == -1,
+                    "A removed font is not silently replaced for printing");
+                form.GetType().GetMethod("ShowFontCatalog", flags)
+                    .Invoke(form, new[] { uiCatalog });
+                printFontList.SelectedIndex = 0;
+                Check(!deleteFontButton.Enabled && fontsList.Items.Count == 2,
+                    "Delete font starts disabled until a row is selected");
+                fontsList.Items[0].Selected = true;
+                System.Windows.Forms.Application.DoEvents();
+                Check(deleteFontButton.Enabled,
+                    "Selecting a font enables its delete button");
+                fontsList.Items[0].Selected = false;
+                System.Windows.Forms.Application.DoEvents();
+                Check(!deleteFontButton.Enabled,
+                    "Clearing the font selection disables deletion");
+                fontsList.Items[1].Selected = true;
+                System.Windows.Forms.Application.DoEvents();
+                Check(deleteFontButton.Enabled,
+                    "Selecting a TTF font also enables deletion");
+                fontsList.Items[1].Selected = false;
+                System.Windows.Forms.Application.DoEvents();
                 var statusLabel = (System.Windows.Forms.Label)form.GetType()
                     .GetField("lblPrinterStatus", flags).GetValue(form);
                 Check(statusLabel.Parent.Name == "panelLogo",
                     "Printer status appears below the app title");
                 form.GetType().GetField("_statusMonitoringStarted", flags).SetValue(form, true);
                 form.GetType().GetField("_lanAddressApplied", flags).SetValue(form, false);
+                object uiPrinter = form.GetType().GetField("_printer", flags).GetValue(form);
+                uiPrinter.GetType().GetProperty("ConnType").SetValue(uiPrinter, 1);
                 var refreshStatus = form.GetType().GetMethod("RequestPrinterStatusRefresh", flags);
                 refreshStatus.Invoke(form, null);
                 Check(statusLabel.Text.Contains("click Apply"),
                     "Unapplied default LAN address is not polled");
-                object uiPrinter = form.GetType().GetField("_printer", flags).GetValue(form);
                 uiPrinter.GetType().GetProperty("ConnType").SetValue(uiPrinter, 3);
                 uiPrinter.GetType().GetProperty("PrinterName").SetValue(uiPrinter, null);
                 refreshStatus.Invoke(form, null);
@@ -235,8 +592,24 @@ namespace GodexIndustrial.Tests
                     rotationList.SelectedIndex = next;
                     Check((int)templateType.GetProperty("Rotation").GetValue(uiTemplate) == next,
                         $"UI selection {next} updates the template");
+                    Check(printFontList.SelectedItem.ToString() == "FNT — A.FNT",
+                        "Template changes do not alter the selected printer font");
                 }
 
+                form.GetType().GetMethod("InvalidatePrinterFontChoices", flags)
+                    .Invoke(form, null);
+                Check(printFontList.Items.Count == 1 &&
+                    printFontList.SelectedItem.ToString() == "A (без перевірки)" &&
+                    fontsList.Items.Count == 0,
+                    "Changing printer connection clears its cached font catalog and choice");
+                var setPrinting = form.GetType().GetMethod("SetPrinting", flags);
+                var connectionGroup = (System.Windows.Forms.Control)form.GetType()
+                    .GetField("groupBox1", flags).GetValue(form);
+                setPrinting.Invoke(form, new object[] { true });
+                Check(!printFontList.Enabled && !fontRefresh.Enabled &&
+                    !connectionGroup.Enabled,
+                    "Printer and font controls are locked during printing");
+                setPrinting.Invoke(form, new object[] { false });
                 var offsets = (List<int>)templateType.GetProperty("XOffsets").GetValue(uiTemplate);
                 if (offsets.Count == 0) offsets.Add(250);
                 else offsets[0] = 250;

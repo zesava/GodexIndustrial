@@ -13,11 +13,6 @@ namespace GodexIndustrial
         {
             _outputTextBox = outputTextBox;
             _logDirectory = AppStorage.EnsureDirectory("Logs");
-
-            if (!Directory.Exists(_logDirectory))
-            {
-                Directory.CreateDirectory(_logDirectory);
-            }
         }
 
         public void Log(string message)
